@@ -6,6 +6,8 @@ import enAdminOps from '../locales/en/admin/ops'
 import enAdminOverview from '../locales/en/admin/overview'
 import enAdminResources from '../locales/en/admin/resources'
 import enAdminSettings from '../locales/en/admin/settings'
+import enAdminUsageRanking from '../locales/en/admin/usageRanking'
+import enAdminModelMarket from '../locales/en/admin/modelMarket'
 import enCommon from '../locales/en/common'
 import enDashboard from '../locales/en/dashboard'
 import enLanding from '../locales/en/landing'
@@ -16,6 +18,8 @@ import zhAdminOps from '../locales/zh/admin/ops'
 import zhAdminOverview from '../locales/zh/admin/overview'
 import zhAdminResources from '../locales/zh/admin/resources'
 import zhAdminSettings from '../locales/zh/admin/settings'
+import zhAdminUsageRanking from '../locales/zh/admin/usageRanking'
+import zhAdminModelMarket from '../locales/zh/admin/modelMarket'
 import zhCommon from '../locales/zh/common'
 import zhDashboard from '../locales/zh/dashboard'
 import zhLanding from '../locales/zh/landing'
@@ -53,7 +57,9 @@ const admins: Record<string, Modules> = {
     accounts: zhAdminAccounts,
     resources: zhAdminResources,
     ops: zhAdminOps,
-    settings: zhAdminSettings
+    settings: zhAdminSettings,
+    usageRanking: zhAdminUsageRanking,
+    modelMarket: zhAdminModelMarket
   },
   en: {
     overview: enAdminOverview,
@@ -61,7 +67,9 @@ const admins: Record<string, Modules> = {
     accounts: enAdminAccounts,
     resources: enAdminResources,
     ops: enAdminOps,
-    settings: enAdminSettings
+    settings: enAdminSettings,
+    usageRanking: enAdminUsageRanking,
+    modelMarket: enAdminModelMarket
   }
 }
 

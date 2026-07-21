@@ -1,0 +1,30 @@
+export default {
+  usageRanking: {
+    title: '用量排行',
+    description: '展示平台用户的 Token 使用量排行榜',
+    heroBadge: '实时排行榜',
+    heroDescription: '展示当前时间范围内 token 使用量前 20 名用户，邮箱已脱敏，仅用于观察平台实时消耗热度。',
+    totalTokenUsage: 'TOKEN 用量',
+    tokenUsage: 'TOKEN 用量',
+    rangeSummary: '当前范围：{range}，更新于 {updated}',
+    mockData: 'Mock 数据',
+    topRank: 'TOP {rank}',
+    topUsersTitle: 'Top 20 用户',
+    topUsersSubtitle: '默认今天，页面每 30 秒自动刷新一次。',
+    emailMasked: '邮箱已脱敏',
+    loadFailed: '用量排行加载失败',
+    emptyTitle: '暂无排行数据',
+    emptyDescription: '当前筛选条件下没有用量记录。',
+    period: {
+      today: '今天',
+      week: '本周',
+      month: '本月',
+      custom: '自定义',
+    },
+    columns: {
+      rank: '排名',
+      user: '用户',
+      tokens: 'TOKEN 用量',
+    },
+  },
+}

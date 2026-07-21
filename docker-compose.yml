@@ -1,0 +1,74 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sub2api:latest
+    container_name: sub2api
+    restart: always
+    env_file:
+      - .env
+    environment:
+      AUTO_SETUP: ${AUTO_SETUP:-true}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+      SERVER_MODE: ${SERVER_MODE:-release}
+      RUN_MODE: ${RUN_MODE:-standard}
+
+      DATABASE_HOST: ${DATABASE_HOST:?DATABASE_HOST is required}
+      DATABASE_PORT: ${DATABASE_PORT:-5432}
+      DATABASE_USER: ${DATABASE_USER:?DATABASE_USER is required}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
+      DATABASE_DBNAME: ${DATABASE_DBNAME:?DATABASE_DBNAME is required}
+      DATABASE_SSLMODE: ${DATABASE_SSLMODE:-disable}
+      DATABASE_MAX_OPEN_CONNS: ${DATABASE_MAX_OPEN_CONNS:-50}
+      DATABASE_MAX_IDLE_CONNS: ${DATABASE_MAX_IDLE_CONNS:-10}
+      DATABASE_CONN_MAX_LIFETIME_MINUTES: ${DATABASE_CONN_MAX_LIFETIME_MINUTES:-30}
+      DATABASE_CONN_MAX_IDLE_TIME_MINUTES: ${DATABASE_CONN_MAX_IDLE_TIME_MINUTES:-5}
+
+      REDIS_HOST: ${REDIS_HOST:?REDIS_HOST is required}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_USERNAME: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_POOL_SIZE: ${REDIS_POOL_SIZE:-1024}
+      REDIS_MIN_IDLE_CONNS: ${REDIS_MIN_IDLE_CONNS:-10}
+      REDIS_ENABLE_TLS: ${REDIS_ENABLE_TLS:-false}
+
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@sub2api.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRE_HOUR: ${JWT_EXPIRE_HOUR:-24}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
+      SETUP_MIGRATION_TIMEOUT_SECONDS: ${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
+      TZ: ${TZ:-Asia/Shanghai}
+
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_OUTPUT_TO_STDOUT: ${LOG_OUTPUT_TO_STDOUT:-true}
+      LOG_OUTPUT_TO_FILE: ${LOG_OUTPUT_TO_FILE:-true}
+      UPDATE_GITHUB_TOKEN: ${UPDATE_GITHUB_TOKEN:-}
+      GEMINI_OAUTH_CLIENT_ID: ${GEMINI_OAUTH_CLIENT_ID:-}
+      GEMINI_OAUTH_CLIENT_SECRET: ${GEMINI_OAUTH_CLIENT_SECRET:-}
+      GEMINI_OAUTH_SCOPES: ${GEMINI_OAUTH_SCOPES:-}
+      GEMINI_QUOTA_POLICY: ${GEMINI_QUOTA_POLICY:-}
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+    volumes:
+      - sub2api_data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  sub2api_data:
+    driver: local

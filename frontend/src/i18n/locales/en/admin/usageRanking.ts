@@ -1,0 +1,30 @@
+export default {
+  usageRanking: {
+    title: 'Usage Ranking',
+    description: 'Token usage leaderboard across platform users',
+    heroBadge: 'Real-time leaderboard',
+    heroDescription: 'Shows the top users by token usage for the selected time range. Emails are masked for operational review.',
+    totalTokenUsage: 'Token Usage',
+    tokenUsage: 'Token Usage',
+    rangeSummary: 'Range: {range}, updated at {updated}',
+    mockData: 'Mock data',
+    topRank: 'TOP {rank}',
+    topUsersTitle: 'Top 20 Users',
+    topUsersSubtitle: 'Defaults to today and refreshes every 30 seconds.',
+    emailMasked: 'Email masked',
+    loadFailed: 'Failed to load usage ranking',
+    emptyTitle: 'No ranking data',
+    emptyDescription: 'No usage records match the current filters.',
+    period: {
+      today: 'Today',
+      week: 'This Week',
+      month: 'This Month',
+      custom: 'Custom',
+    },
+    columns: {
+      rank: 'Rank',
+      user: 'User',
+      tokens: 'Token Usage',
+    },
+  },
+}

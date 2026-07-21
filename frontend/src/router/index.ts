@@ -613,6 +613,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/usage-ranking',
+    name: 'AdminUsageRanking',
+    component: () => import('@/views/admin/UsageRankingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Usage Ranking',
+      titleKey: 'admin.usageRanking.title',
+      descriptionKey: 'admin.usageRanking.description'
+    }
+  },
+  {
+    path: '/admin/model-market',
+    name: 'AdminModelMarket',
+    component: () => import('@/views/admin/ModelMarketView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Model Market',
+      titleKey: 'admin.modelMarket.title',
+      descriptionKey: 'admin.modelMarket.description'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },

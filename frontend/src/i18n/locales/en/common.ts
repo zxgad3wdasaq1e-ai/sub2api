@@ -172,6 +172,8 @@ export default {
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
     promoCodes: 'Promo Codes',
+    usageRanking: 'Usage Ranking',
+    modelMarket: 'Model Market',
     settings: 'Settings',
     myAccount: 'My Account',
     lightMode: 'Light Mode',
