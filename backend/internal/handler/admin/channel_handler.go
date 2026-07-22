@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -541,24 +542,143 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 
 // ModelMarketEntry represents a single model shown in the model market.
 type ModelMarketEntry struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	Type             string  `json:"type"`
-	TypeLabel        string  `json:"type_label,omitempty"`
-	Platform         string  `json:"platform"`
-	InputPrice       float64 `json:"input_price"`
-	OutputPrice      float64 `json:"output_price"`
-	CacheWritePrice  float64 `json:"cache_write_price"`
-	CacheReadPrice   float64 `json:"cache_read_price"`
-	ChannelCount     int     `json:"channel_count"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Type            string    `json:"type"`
+	TypeLabel       string    `json:"type_label,omitempty"`
+	Category        string    `json:"category"`
+	Platform        string    `json:"platform"`
+	InputPrice      *float64  `json:"input_price"`
+	OutputPrice     *float64  `json:"output_price"`
+	CacheWritePrice *float64  `json:"cache_write_price"`
+	CacheReadPrice  *float64  `json:"cache_read_price"`
+	ChannelCount    int       `json:"channel_count"`
+	ChannelIDs      []int64   `json:"channel_ids"`
+	Recommended     bool      `json:"recommended"`
+	PlatformAdapted bool      `json:"platform_adapted"`
 }
 
 // perTokenToPerMillion converts a per-token price to per-million-tokens price.
-func perTokenToPerMillion(v *float64) float64 {
+func perTokenToPerMillion(v *float64) *float64 {
 	if v == nil {
-		return 0
+		return nil
 	}
-	return *v * 1_000_000
+	converted := *v * 1_000_000
+	return &converted
+}
+
+func lowestPrice(current, candidate *float64) *float64 {
+	if candidate == nil {
+		return current
+	}
+	if current == nil || *candidate < *current {
+		value := *candidate
+		return &value
+	}
+	return current
+}
+
+type modelMarketAggregate struct {
+	entry      ModelMarketEntry
+	channelIDs map[int64]struct{}
+}
+
+func buildModelMarketEntries(channels []service.AvailableChannel, keyword, category string) ([]ModelMarketEntry, int) {
+	aggregated := make(map[string]*modelMarketAggregate)
+	activeChannels := 0
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+
+	for i := range channels {
+		channel := &channels[i]
+		if !strings.EqualFold(channel.Status, "active") {
+			continue
+		}
+		activeChannels++
+
+		for _, model := range channel.SupportedModels {
+			name := strings.TrimSpace(model.Name)
+			platform := strings.TrimSpace(model.Platform)
+			if name == "" || platform == "" {
+				continue
+			}
+			key := strings.ToLower(platform) + "|" + strings.ToLower(name)
+			agg, exists := aggregated[key]
+			if !exists {
+				agg = &modelMarketAggregate{
+					entry: ModelMarketEntry{
+						ID:         strings.ToLower(platform) + ":" + name,
+						Name:       name,
+						Platform:   platform,
+						TypeLabel:  platform,
+						ChannelIDs: make([]int64, 0, 1),
+					},
+					channelIDs: make(map[int64]struct{}),
+				}
+				aggregated[key] = agg
+			}
+
+			agg.channelIDs[channel.ID] = struct{}{}
+			agg.entry.PlatformAdapted = agg.entry.PlatformAdapted || model.Adapted
+			if model.Pricing != nil {
+				agg.entry.InputPrice = lowestPrice(agg.entry.InputPrice, perTokenToPerMillion(model.Pricing.InputPrice))
+				agg.entry.OutputPrice = lowestPrice(agg.entry.OutputPrice, perTokenToPerMillion(model.Pricing.OutputPrice))
+				agg.entry.CacheWritePrice = lowestPrice(agg.entry.CacheWritePrice, perTokenToPerMillion(model.Pricing.CacheWritePrice))
+				agg.entry.CacheReadPrice = lowestPrice(agg.entry.CacheReadPrice, perTokenToPerMillion(model.Pricing.CacheReadPrice))
+			}
+		}
+	}
+
+	result := make([]ModelMarketEntry, 0, len(aggregated))
+	for _, agg := range aggregated {
+		for channelID := range agg.channelIDs {
+			agg.entry.ChannelIDs = append(agg.entry.ChannelIDs, channelID)
+		}
+		sort.Slice(agg.entry.ChannelIDs, func(i, j int) bool {
+			return agg.entry.ChannelIDs[i] < agg.entry.ChannelIDs[j]
+		})
+		agg.entry.ChannelCount = len(agg.entry.ChannelIDs)
+		agg.entry.Recommended = agg.entry.ChannelCount >= 2
+		switch {
+		case agg.entry.PlatformAdapted:
+			agg.entry.Type = "ADAPTED"
+			agg.entry.Category = "platform"
+		default:
+			agg.entry.Type = "OFFICIAL"
+			agg.entry.Category = "all"
+		}
+		if agg.entry.Recommended {
+			agg.entry.Category = "recommended"
+		}
+
+		if keyword != "" && !strings.Contains(strings.ToLower(agg.entry.Name), keyword) &&
+			!strings.Contains(strings.ToLower(agg.entry.Platform), keyword) {
+			continue
+		}
+		if category == "recommended" && !agg.entry.Recommended {
+			continue
+		}
+		if category == "platform" && !agg.entry.PlatformAdapted {
+			continue
+		}
+		result = append(result, agg.entry)
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Recommended != result[j].Recommended {
+			return result[i].Recommended
+		}
+		if result[i].ChannelCount != result[j].ChannelCount {
+			return result[i].ChannelCount > result[j].ChannelCount
+		}
+		leftPlatform := strings.ToLower(result[i].Platform)
+		rightPlatform := strings.ToLower(result[j].Platform)
+		if leftPlatform != rightPlatform {
+			return leftPlatform < rightPlatform
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+
+	return result, activeChannels
 }
 
 // ListModelMarket returns a flat list of all models across all active channels,
@@ -566,98 +686,23 @@ func perTokenToPerMillion(v *float64) float64 {
 // GET /api/v1/admin/models
 func (h *ChannelHandler) ListModelMarket(c *gin.Context) {
 	ctx := c.Request.Context()
-	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
+	keyword := c.Query("keyword")
+	category := strings.ToLower(strings.TrimSpace(c.DefaultQuery("category", "all")))
+	if category != "all" && category != "recommended" && category != "platform" {
+		response.BadRequest(c, "Invalid model category")
+		return
+	}
 
-	// List all active channels
-	channels, _, err := h.channelService.List(ctx, pagination.PaginationParams{
-		Page:      1,
-		PageSize:  1000,
-		SortBy:    "created_at",
-		SortOrder: "desc",
-	}, "active", "")
+	channels, err := h.channelService.ListAvailable(ctx)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-
-	// Aggregate models across channels, deduplicating by (platform, name)
-	type modelAgg struct {
-		entry        ModelMarketEntry
-		channelCount int
-	}
-	aggregated := make(map[string]*modelAgg) // key: platform|name
-
-	for i := range channels {
-		ch := &channels[i]
-		supportedModels := ch.SupportedModels()
-		for _, sm := range supportedModels {
-			key := sm.Platform + "|" + sm.Name
-			if agg, ok := aggregated[key]; ok {
-				agg.channelCount++
-				// Use the lowest pricing from channels (best deal for market display)
-				if sm.Pricing != nil && sm.Pricing.InputPrice != nil {
-					ip := perTokenToPerMillion(sm.Pricing.InputPrice)
-					if agg.entry.InputPrice == 0 || ip < agg.entry.InputPrice {
-						agg.entry.InputPrice = ip
-					}
-				}
-				if sm.Pricing != nil && sm.Pricing.OutputPrice != nil {
-					op := perTokenToPerMillion(sm.Pricing.OutputPrice)
-					if agg.entry.OutputPrice == 0 || op < agg.entry.OutputPrice {
-						agg.entry.OutputPrice = op
-					}
-				}
-				if sm.Pricing != nil && sm.Pricing.CacheWritePrice != nil {
-					cwp := perTokenToPerMillion(sm.Pricing.CacheWritePrice)
-					if agg.entry.CacheWritePrice == 0 || cwp < agg.entry.CacheWritePrice {
-						agg.entry.CacheWritePrice = cwp
-					}
-				}
-				if sm.Pricing != nil && sm.Pricing.CacheReadPrice != nil {
-					crp := perTokenToPerMillion(sm.Pricing.CacheReadPrice)
-					if agg.entry.CacheReadPrice == 0 || crp < agg.entry.CacheReadPrice {
-						agg.entry.CacheReadPrice = crp
-					}
-				}
-			} else {
-				entry := ModelMarketEntry{
-					ID:         sm.Name,
-					Name:       sm.Name,
-					Type:       "CHANNEL",
-					Platform:   sm.Platform,
-					ChannelCount: 1,
-				}
-				if sm.Pricing != nil {
-					entry.InputPrice = perTokenToPerMillion(sm.Pricing.InputPrice)
-					entry.OutputPrice = perTokenToPerMillion(sm.Pricing.OutputPrice)
-					entry.CacheWritePrice = perTokenToPerMillion(sm.Pricing.CacheWritePrice)
-					entry.CacheReadPrice = perTokenToPerMillion(sm.Pricing.CacheReadPrice)
-				}
-				aggregated[key] = &modelAgg{entry: entry, channelCount: 1}
-			}
-		}
-	}
-
-	// Build result list, optionally filtered by keyword
-	result := make([]ModelMarketEntry, 0, len(aggregated))
-	for _, agg := range aggregated {
-		agg.entry.ChannelCount = agg.channelCount
-		if keyword != "" && !strings.Contains(strings.ToLower(agg.entry.Name), keyword) &&
-			!strings.Contains(strings.ToLower(agg.entry.Platform), keyword) {
-			continue
-		}
-		result = append(result, agg.entry)
-	}
-
-	// Count unique channels
-	uniqueChannels := make(map[int64]struct{})
-	for i := range channels {
-		uniqueChannels[channels[i].ID] = struct{}{}
-	}
+	result, activeChannels := buildModelMarketEntries(channels, keyword, category)
 
 	response.Success(c, gin.H{
 		"models":            result,
 		"total":              len(result),
-		"available_channels": len(uniqueChannels),
+		"available_channels": activeChannels,
 	})
 }

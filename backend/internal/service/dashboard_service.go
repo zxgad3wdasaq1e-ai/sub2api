@@ -365,6 +365,14 @@ func (s *DashboardService) GetUserSpendingRanking(ctx context.Context, startTime
 	return ranking, nil
 }
 
+func (s *DashboardService) GetUserTokenUsageRanking(ctx context.Context, startTime, endTime time.Time, page, pageSize int) (*usagestats.UserTokenUsageRankingResponse, error) {
+	ranking, err := s.usageRepo.GetUserTokenUsageRanking(ctx, startTime, endTime, page, pageSize)
+	if err != nil {
+		return nil, fmt.Errorf("get user token usage ranking: %w", err)
+	}
+	return ranking, nil
+}
+
 func (s *DashboardService) GetUserBreakdownStats(ctx context.Context, startTime, endTime time.Time, dim usagestats.UserBreakdownDimension, limit int) ([]usagestats.UserBreakdownItem, error) {
 	stats, err := s.usageRepo.GetUserBreakdownStats(ctx, startTime, endTime, dim, limit)
 	if err != nil {

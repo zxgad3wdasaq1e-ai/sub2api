@@ -22,6 +22,8 @@ type UserUsageTrendPoint = usagestats.UserUsageTrendPoint
 // UserSpendingRankingItem represents a user spending ranking row.
 type UserSpendingRankingItem = usagestats.UserSpendingRankingItem
 type UserSpendingRankingResponse = usagestats.UserSpendingRankingResponse
+type UserTokenUsageRankingItem = usagestats.UserTokenUsageRankingItem
+type UserTokenUsageRankingResponse = usagestats.UserTokenUsageRankingResponse
 
 // APIKeyUsageTrendPoint represents API key usage trend data point
 type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
@@ -217,6 +219,116 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		TotalRequests:   totalRequests,
 		TotalTokens:     totalTokens,
 	}, nil
+}
+
+// GetUserTokenUsageRanking returns users ordered by token usage with server-side pagination.
+func (r *usageLogRepository) GetUserTokenUsageRanking(ctx context.Context, startTime, endTime time.Time, page, pageSize int) (result *UserTokenUsageRankingResponse, err error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	query := `
+		WITH user_usage AS (
+			SELECT
+				u.user_id,
+				COALESCE(us.email, '') AS email,
+				COALESCE(SUM(u.actual_cost), 0) AS actual_cost,
+				COUNT(*) AS requests,
+				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) AS tokens
+			FROM usage_logs u
+			LEFT JOIN users us ON u.user_id = us.id
+			WHERE u.created_at >= $1 AND u.created_at < $2
+			GROUP BY u.user_id, us.email
+		),
+		ranked AS (
+			SELECT
+				ROW_NUMBER() OVER (ORDER BY tokens DESC, actual_cost DESC, user_id ASC) AS rank,
+				user_id,
+				email,
+				actual_cost,
+				requests,
+				tokens
+			FROM user_usage
+		),
+		totals AS (
+			SELECT
+				COUNT(*) AS total_users,
+				COALESCE(SUM(actual_cost), 0) AS total_actual_cost,
+				COALESCE(SUM(requests), 0) AS total_requests,
+				COALESCE(SUM(tokens), 0) AS total_tokens
+			FROM user_usage
+		),
+		selected AS (
+			SELECT *
+			FROM ranked
+			WHERE rank <= 3 OR (rank > $3 AND rank <= $3 + $4)
+		)
+		SELECT
+			COALESCE(s.rank, 0),
+			COALESCE(s.user_id, 0),
+			COALESCE(s.email, ''),
+			COALESCE(s.actual_cost, 0),
+			COALESCE(s.requests, 0),
+			COALESCE(s.tokens, 0),
+			t.total_users,
+			t.total_actual_cost,
+			t.total_requests,
+			t.total_tokens
+		FROM totals t
+		LEFT JOIN selected s ON TRUE
+		ORDER BY s.rank ASC NULLS LAST
+	`
+
+	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, offset, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+			result = nil
+		}
+	}()
+
+	result = &UserTokenUsageRankingResponse{
+		Ranking:  make([]UserTokenUsageRankingItem, 0, pageSize),
+		TopUsers: make([]UserTokenUsageRankingItem, 0, 3),
+	}
+	for rows.Next() {
+		var row UserTokenUsageRankingItem
+		if err = rows.Scan(
+			&row.Rank,
+			&row.UserID,
+			&row.Email,
+			&row.ActualCost,
+			&row.Requests,
+			&row.Tokens,
+			&result.TotalUsers,
+			&result.TotalActualCost,
+			&result.TotalRequests,
+			&result.TotalTokens,
+		); err != nil {
+			return nil, err
+		}
+		if row.Rank == 0 {
+			continue
+		}
+		if row.Rank <= 3 {
+			result.TopUsers = append(result.TopUsers, row)
+		}
+		if row.Rank > int64(offset) && row.Rank <= int64(offset+pageSize) {
+			result.Ranking = append(result.Ranking, row)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // GetUserUsageTrendByUserID 获取指定用户的使用趋势

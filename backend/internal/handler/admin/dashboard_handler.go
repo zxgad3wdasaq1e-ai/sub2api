@@ -531,6 +531,52 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 	response.Success(c, payload)
 }
 
+func parseUsageRankingPagination(c *gin.Context) (int, int) {
+	page, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("page", "1")))
+	if err != nil || page <= 0 {
+		page = 1
+	}
+	if page > 1_000_000 {
+		page = 1_000_000
+	}
+
+	pageSize, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("page_size", "20")))
+	if err != nil || pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+// GetUserTokenUsageRanking handles the token-based user ranking page.
+// GET /api/v1/admin/usage/ranking
+func (h *DashboardHandler) GetUserTokenUsageRanking(c *gin.Context) {
+	startTime, endTime := parseTimeRange(c)
+	page, pageSize := parseUsageRankingPagination(c)
+
+	ranking, err := h.dashboardService.GetUserTokenUsageRanking(c.Request.Context(), startTime, endTime, page, pageSize)
+	if err != nil {
+		response.Error(c, 500, "Failed to get user token usage ranking")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"items":             ranking.Ranking,
+		"top_users":         ranking.TopUsers,
+		"total":             ranking.TotalUsers,
+		"total_actual_cost": ranking.TotalActualCost,
+		"total_requests":    ranking.TotalRequests,
+		"total_tokens":      ranking.TotalTokens,
+		"page":              page,
+		"page_size":         pageSize,
+		"start_date":        startTime.Format("2006-01-02"),
+		"end_date":          endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"updated_at":        time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 // GetBatchUsersUsage handles getting usage stats for multiple users
 // POST /api/v1/admin/dashboard/users-usage
 func (h *DashboardHandler) GetBatchUsersUsage(c *gin.Context) {
