@@ -173,7 +173,7 @@ export default {
     ops: 'Ops',
     promoCodes: 'Promo Codes',
     usageRanking: 'Usage Ranking',
-    modelMarket: 'Model Market',
+    modelMarket: 'Model Pricing',
     settings: 'Settings',
     myAccount: 'My Account',
     lightMode: 'Light Mode',

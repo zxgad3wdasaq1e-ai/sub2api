@@ -105,7 +105,7 @@ func RegisterAdminRoutes(
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)
 
-		// 模型广场
+		// 模型定价（保留管理员接口以兼容旧客户端）
 		admin.GET("/models", h.Admin.Channel.ListModelMarket)
 
 		// 风控中心

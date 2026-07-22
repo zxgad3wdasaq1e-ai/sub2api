@@ -1,8 +1,8 @@
 /**
- * Admin model market API.
+ * Shared model pricing API.
  *
  * Calls the real backend endpoint:
- * GET /api/v1/admin/models?keyword=&category=
+ * GET /api/v1/models/pricing?keyword=&category=
  */
 
 import { apiClient } from '../client'
@@ -45,7 +45,7 @@ export interface ModelListResponse {
 
 export type UpdateModelRequest = Partial<Omit<ModelMarketModel, 'id'>>
 
-/** Raw response from GET /api/v1/admin/models */
+/** Raw response from GET /api/v1/models/pricing */
 interface RawModelMarketEntry {
   id: string
   name: string
@@ -101,7 +101,7 @@ function transformModelList(raw: RawModelListResponse): ModelListResponse {
 }
 
 export async function getModels(params: ModelListParams = {}): Promise<ModelListResponse> {
-  const { data } = await apiClient.get<RawModelListResponse>('/admin/models', {
+  const { data } = await apiClient.get<RawModelListResponse>('/models/pricing', {
     params: {
       keyword: params.keyword || undefined,
       category: params.category || 'all',

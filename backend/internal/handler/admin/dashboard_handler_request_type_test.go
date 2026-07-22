@@ -97,6 +97,7 @@ func newDashboardRequestTypeTestRouter(repo *dashboardUsageRepoCapture) *gin.Eng
 	router.GET("/admin/dashboard/models", handler.GetModelStats)
 	router.GET("/admin/dashboard/users-ranking", handler.GetUserSpendingRanking)
 	router.GET("/admin/usage/ranking", handler.GetUserTokenUsageRanking)
+	router.GET("/usage/ranking", handler.GetPublicUserTokenUsageRanking)
 	return router
 }
 
@@ -238,4 +239,28 @@ func TestDashboardUserTokenUsageRankingPagination(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "\"top_users\"")
 	require.Contains(t, rec.Body.String(), "\"total\":41")
 	require.Contains(t, rec.Body.String(), "\"page_size\":100")
+	require.Contains(t, rec.Body.String(), "token@example.com")
+}
+
+func TestMaskRankingEmail(t *testing.T) {
+	require.Equal(t, "7****0@q*.com", maskRankingEmail("712340@qq.com"))
+	require.Equal(t, "x***@d***", maskRankingEmail("x@domain"))
+	require.Equal(t, "not-an-email", maskRankingEmail("not-an-email"))
+}
+
+func TestPublicUserTokenUsageRankingOmitsSensitiveFields(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/ranking", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "t***n@e***.com")
+	require.Contains(t, rec.Body.String(), "\"tokens\":900")
+	require.NotContains(t, rec.Body.String(), "token@example.com")
+	require.NotContains(t, rec.Body.String(), "\"user_id\"")
+	require.NotContains(t, rec.Body.String(), "\"actual_cost\"")
+	require.NotContains(t, rec.Body.String(), "\"requests\"")
 }

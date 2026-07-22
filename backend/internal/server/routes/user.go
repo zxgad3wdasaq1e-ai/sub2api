@@ -22,6 +22,9 @@ func RegisterUserRoutes(
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	{
+		// 所有登录用户可查看的平台模型定价。
+		authenticated.GET("/models/pricing", h.Admin.Channel.ListModelMarket)
+
 		// 用户接口
 		user := authenticated.Group("/user")
 		{
@@ -87,6 +90,7 @@ func RegisterUserRoutes(
 		usage := authenticated.Group("/usage")
 		{
 			usage.GET("", h.Usage.List)
+			usage.GET("/ranking", h.Admin.Dashboard.GetPublicUserTokenUsageRanking)
 			usage.GET("/errors", h.Usage.ListErrors)
 			usage.GET("/errors/:id", h.Usage.GetErrorDetail)
 			usage.GET("/:id", h.Usage.GetByID)

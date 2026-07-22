@@ -1,8 +1,8 @@
 /**
- * Admin usage ranking API.
+ * Shared usage ranking API.
  *
  * Calls the real backend endpoint:
- * GET /api/v1/admin/usage/ranking?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&page=N&page_size=N
+ * GET /api/v1/usage/ranking?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&page=N&page_size=N
  */
 
 import { apiClient } from '../client'
@@ -40,13 +40,13 @@ export interface UsageRankingResponse {
   pageSize: number
 }
 
-/** Raw response from GET /api/v1/admin/usage/ranking */
+/** Raw response from GET /api/v1/usage/ranking */
 interface RawRankingItem {
   rank: number
   user_id: number
   email: string
-  actual_cost: number
-  requests: number
+  actual_cost?: number
+  requests?: number
   tokens: number
 }
 
@@ -106,8 +106,8 @@ function transformRankingResponse(raw: RawRankingResponse, query: UsageRankingQu
     rank: item.rank,
     email: item.email,
     tokens: item.tokens,
-    actualCost: item.actual_cost,
-    requests: item.requests,
+    actualCost: item.actual_cost ?? 0,
+    requests: item.requests ?? 0,
   })
 
   const page = raw.page ?? query.page ?? 1
@@ -133,7 +133,7 @@ function transformRankingResponse(raw: RawRankingResponse, query: UsageRankingQu
 
 export async function getUsageRanking(query: UsageRankingQuery): Promise<UsageRankingResponse> {
   const { start, end } = periodToDateRange(query.period, query.startDate, query.endDate)
-  const { data } = await apiClient.get<RawRankingResponse>('/admin/usage/ranking', {
+  const { data } = await apiClient.get<RawRankingResponse>('/usage/ranking', {
     params: {
       start_date: start,
       end_date: end,

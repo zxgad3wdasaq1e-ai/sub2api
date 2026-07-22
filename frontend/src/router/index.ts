@@ -231,6 +231,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/usage-ranking',
+    name: 'UsageRanking',
+    component: () => import('@/views/admin/UsageRankingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Usage Ranking',
+      titleKey: 'admin.usageRanking.title',
+      descriptionKey: 'admin.usageRanking.description'
+    }
+  },
+  {
+    path: '/model-pricing',
+    name: 'ModelPricing',
+    component: () => import('@/views/admin/ModelMarketView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Model Pricing',
+      titleKey: 'admin.modelMarket.title',
+      descriptionKey: 'admin.modelMarket.description'
+    }
+  },
+  {
     path: '/redeem',
     name: 'Redeem',
     component: () => import('@/views/user/RedeemView.vue'),
@@ -614,27 +638,11 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/admin/usage-ranking',
-    name: 'AdminUsageRanking',
-    component: () => import('@/views/admin/UsageRankingView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Usage Ranking',
-      titleKey: 'admin.usageRanking.title',
-      descriptionKey: 'admin.usageRanking.description'
-    }
+    redirect: '/usage-ranking'
   },
   {
     path: '/admin/model-market',
-    name: 'AdminModelMarket',
-    component: () => import('@/views/admin/ModelMarketView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Model Market',
-      titleKey: 'admin.modelMarket.title',
-      descriptionKey: 'admin.modelMarket.description'
-    }
+    redirect: '/model-pricing'
   },
   {
     path: '/admin/affiliates',

@@ -1,8 +1,8 @@
 export default {
   modelMarket: {
-    title: '模型广场',
+    title: '模型定价',
     description: '展示平台支持的所有 AI 模型及定价信息',
-    heroBadge: '可用模型与实时定价',
+    heroBadge: '模型与实时定价',
     searchPlaceholder: '搜索模型或平台...',
     availableModels: '可用模型',
     availableChannels: '可用渠道',

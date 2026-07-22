@@ -1,6 +1,6 @@
 export default {
   modelMarket: {
-    title: 'Model Market',
+    title: 'Model Pricing',
     description: 'Supported AI models and pricing information',
     heroBadge: 'Available models and live pricing',
     searchPlaceholder: 'Search models or platforms...',

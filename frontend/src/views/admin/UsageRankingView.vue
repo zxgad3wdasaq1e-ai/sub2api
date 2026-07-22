@@ -249,6 +249,7 @@ function formatTokens(value: number): string {
 }
 
 function maskEmail(email: string): string {
+  if (email.includes('*')) return email
   const [localPart, domainPart = ''] = email.split('@')
   if (!localPart || !domainPart) return email
 

@@ -61,4 +61,16 @@ describe('router WeChat OAuth route', () => {
     expect(route?.meta.requiresAuth).toBe(false)
     expect(route?.meta.title).toBe('WeChat Payment Callback')
   })
+
+  it.each([
+    ['UsageRanking', '/usage-ranking'],
+    ['ModelPricing', '/model-pricing'],
+  ])('registers %s for every authenticated user', async (name, path) => {
+    const { default: router } = await import('@/router')
+    const route = router.getRoutes().find((record) => record.name === name)
+
+    expect(route?.path).toBe(path)
+    expect(route?.meta.requiresAuth).toBe(true)
+    expect(route?.meta.requiresAdmin).toBe(false)
+  })
 })

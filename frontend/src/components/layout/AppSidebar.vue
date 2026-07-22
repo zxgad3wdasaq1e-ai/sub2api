@@ -703,6 +703,8 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
+    { path: '/usage-ranking', label: t('nav.usageRanking'), icon: ChartIcon },
+    { path: '/model-pricing', label: t('nav.modelMarket'), icon: PriceTagIcon },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
@@ -733,7 +735,9 @@ const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(tru
 // Personal navigation items (for admin's "My Account" section, without Dashboard).
 // Admins access 可用渠道 from this section just like regular users — there is no
 // separate admin entry, since the page is purely a user-facing view.
-const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(false)))
+const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(false)).filter(
+  (item) => item.path !== '/usage-ranking' && item.path !== '/model-pricing'
+))
 
 // Custom menu items filtered by visibility
 const customMenuItemsForUser = computed(() => {
@@ -812,8 +816,8 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/usage-ranking', label: t('nav.usageRanking'), icon: ChartIcon },
-    { path: '/admin/model-market', label: t('nav.modelMarket'), icon: PriceTagIcon },
+    { path: '/usage-ranking', label: t('nav.usageRanking'), icon: ChartIcon },
+    { path: '/model-pricing', label: t('nav.modelMarket'), icon: PriceTagIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 

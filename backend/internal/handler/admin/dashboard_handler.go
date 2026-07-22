@@ -550,15 +550,81 @@ func parseUsageRankingPagination(c *gin.Context) (int, int) {
 	return page, pageSize
 }
 
-// GetUserTokenUsageRanking handles the token-based user ranking page.
-// GET /api/v1/admin/usage/ranking
-func (h *DashboardHandler) GetUserTokenUsageRanking(c *gin.Context) {
+func maskRankingEmail(email string) string {
+	email = strings.TrimSpace(email)
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return email
+	}
+
+	local := []rune(email[:at])
+	domainParts := strings.Split(email[at+1:], ".")
+	domain := []rune(domainParts[0])
+	if len(local) == 0 || len(domain) == 0 {
+		return email
+	}
+
+	localStars := len(local) - 2
+	if localStars < 3 {
+		localStars = 3
+	}
+	if localStars > 8 {
+		localStars = 8
+	}
+	maskedLocal := string(local[0]) + strings.Repeat("*", localStars)
+	if len(local) > 1 {
+		maskedLocal += string(local[len(local)-1])
+	}
+
+	maskedDomain := "*"
+	if len(domain) > 1 {
+		domainStars := len(domain) - 1
+		if domainStars > 3 {
+			domainStars = 3
+		}
+		maskedDomain = string(domain[0]) + strings.Repeat("*", domainStars)
+	}
+	if len(domainParts) > 1 {
+		maskedDomain += "." + strings.Join(domainParts[1:], ".")
+	}
+	return maskedLocal + "@" + maskedDomain
+}
+
+type publicTokenRankingItem struct {
+	Rank   int64  `json:"rank"`
+	Email  string `json:"email"`
+	Tokens int64  `json:"tokens"`
+}
+
+func toPublicTokenRankingItems(items []usagestats.UserTokenUsageRankingItem) []publicTokenRankingItem {
+	result := make([]publicTokenRankingItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, publicTokenRankingItem{
+			Rank:   item.Rank,
+			Email:  maskRankingEmail(item.Email),
+			Tokens: item.Tokens,
+		})
+	}
+	return result
+}
+
+func (h *DashboardHandler) loadUserTokenUsageRanking(c *gin.Context) (*usagestats.UserTokenUsageRankingResponse, time.Time, time.Time, int, int, bool) {
 	startTime, endTime := parseTimeRange(c)
 	page, pageSize := parseUsageRankingPagination(c)
 
 	ranking, err := h.dashboardService.GetUserTokenUsageRanking(c.Request.Context(), startTime, endTime, page, pageSize)
 	if err != nil {
 		response.Error(c, 500, "Failed to get user token usage ranking")
+		return nil, time.Time{}, time.Time{}, 0, 0, false
+	}
+	return ranking, startTime, endTime, page, pageSize, true
+}
+
+// GetUserTokenUsageRanking handles the token-based user ranking page.
+// GET /api/v1/admin/usage/ranking
+func (h *DashboardHandler) GetUserTokenUsageRanking(c *gin.Context) {
+	ranking, startTime, endTime, page, pageSize, ok := h.loadUserTokenUsageRanking(c)
+	if !ok {
 		return
 	}
 
@@ -574,6 +640,27 @@ func (h *DashboardHandler) GetUserTokenUsageRanking(c *gin.Context) {
 		"start_date":        startTime.Format("2006-01-02"),
 		"end_date":          endTime.Add(-24 * time.Hour).Format("2006-01-02"),
 		"updated_at":        time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// GetPublicUserTokenUsageRanking returns the ranking without internal IDs or cost data.
+// GET /api/v1/usage/ranking
+func (h *DashboardHandler) GetPublicUserTokenUsageRanking(c *gin.Context) {
+	ranking, startTime, endTime, page, pageSize, ok := h.loadUserTokenUsageRanking(c)
+	if !ok {
+		return
+	}
+
+	response.Success(c, gin.H{
+		"items":        toPublicTokenRankingItems(ranking.Ranking),
+		"top_users":    toPublicTokenRankingItems(ranking.TopUsers),
+		"total":        ranking.TotalUsers,
+		"total_tokens": ranking.TotalTokens,
+		"page":         page,
+		"page_size":    pageSize,
+		"start_date":   startTime.Format("2006-01-02"),
+		"end_date":     endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"updated_at":   time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

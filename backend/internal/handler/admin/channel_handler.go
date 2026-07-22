@@ -683,7 +683,7 @@ func buildModelMarketEntries(channels []service.AvailableChannel, keyword, categ
 
 // ListModelMarket returns a flat list of all models across all active channels,
 // with aggregated pricing information for the model market page.
-// GET /api/v1/admin/models
+// GET /api/v1/models/pricing and /api/v1/admin/models
 func (h *ChannelHandler) ListModelMarket(c *gin.Context) {
 	ctx := c.Request.Context()
 	keyword := c.Query("keyword")

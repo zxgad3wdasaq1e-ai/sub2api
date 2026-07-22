@@ -44,7 +44,7 @@
       <ModelPriceMetric :label="t('admin.modelMarket.pricing.cachedOutput')" :value="model.pricing.cachedOutput" tone="cachedOutput" />
     </div>
 
-    <div class="mt-4 flex justify-end">
+    <div v-if="canConfigure" class="mt-4 flex justify-end">
       <button type="button" class="btn btn-secondary btn-sm" @click="$emit('configure', model)">
         <Icon name="cog" size="sm" />
         {{ t('common.settings') }}
@@ -60,9 +60,12 @@ import type { ModelMarketModel } from '@/api/admin/models'
 import Icon from '@/components/icons/Icon.vue'
 import ModelPriceMetric from './ModelPriceMetric.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   model: ModelMarketModel
-}>()
+  canConfigure?: boolean
+}>(), {
+  canConfigure: false,
+})
 
 defineEmits<{
   configure: [model: ModelMarketModel]

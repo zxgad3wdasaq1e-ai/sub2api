@@ -98,6 +98,7 @@
             v-for="model in models"
             :key="model.id"
             :model="model"
+            :can-configure="authStore.isAdmin"
             @configure="handleConfigure"
           />
         </div>
@@ -125,14 +126,14 @@
                   <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     {{ t('admin.modelMarket.pricing.cachedOutput') }}
                   </th>
-                  <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  <th v-if="authStore.isAdmin" class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     {{ t('common.actions') }}
                   </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-dark-900">
                 <tr v-if="models.length === 0">
-                  <td colspan="7" class="px-5 py-12">
+                  <td :colspan="authStore.isAdmin ? 7 : 6" class="px-5 py-12">
                     <EmptyState :title="t('admin.modelMarket.emptyTitle')" :description="t('admin.modelMarket.emptyDescription')" />
                   </td>
                 </tr>
@@ -151,7 +152,7 @@
                   <td class="whitespace-nowrap px-5 py-4 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatPrice(model.pricing.output) }}</td>
                   <td class="whitespace-nowrap px-5 py-4 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatPrice(model.pricing.cachedInput) }}</td>
                   <td class="whitespace-nowrap px-5 py-4 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ formatPrice(model.pricing.cachedOutput) }}</td>
-                  <td class="whitespace-nowrap px-5 py-4 text-right">
+                  <td v-if="authStore.isAdmin" class="whitespace-nowrap px-5 py-4 text-right">
                     <button type="button" class="btn btn-secondary btn-sm" @click="handleConfigure(model)">
                       <Icon name="cog" size="sm" />
                       {{ t('common.settings') }}
@@ -179,6 +180,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { getModels, type ModelMarketCategory, type ModelMarketModel } from '@/api/admin/models'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -189,6 +191,7 @@ type ViewMode = 'grid' | 'list'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const router = useRouter()
 
 const keyword = ref('')
@@ -239,6 +242,7 @@ function setCategory(nextCategory: ModelMarketCategory): void {
 }
 
 function handleConfigure(model: ModelMarketModel): void {
+  if (!authStore.isAdmin) return
   void router.push({
     name: 'AdminChannels',
     query: { model: model.name, platform: model.platform },
