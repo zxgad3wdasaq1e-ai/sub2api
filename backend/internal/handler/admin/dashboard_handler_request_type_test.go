@@ -22,6 +22,8 @@ type dashboardUsageRepoCapture struct {
 	rankingLimit     int
 	ranking          []usagestats.UserSpendingRankingItem
 	rankingTotal     float64
+	tokenRankingPage int
+	tokenRankingSize int
 }
 
 func (s *dashboardUsageRepoCapture) GetUsageTrendWithFilters(
@@ -66,6 +68,26 @@ func (s *dashboardUsageRepoCapture) GetUserSpendingRanking(
 	}, nil
 }
 
+func (s *dashboardUsageRepoCapture) GetUserTokenUsageRanking(
+	ctx context.Context,
+	startTime, endTime time.Time,
+	page, pageSize int,
+) (*usagestats.UserTokenUsageRankingResponse, error) {
+	s.tokenRankingPage = page
+	s.tokenRankingSize = pageSize
+	item := usagestats.UserTokenUsageRankingItem{
+		Rank: 21, UserID: 7, Email: "token@example.com", ActualCost: 2.5, Requests: 3, Tokens: 900,
+	}
+	return &usagestats.UserTokenUsageRankingResponse{
+		Ranking:         []usagestats.UserTokenUsageRankingItem{item},
+		TopUsers:        []usagestats.UserTokenUsageRankingItem{{Rank: 1, UserID: 1, Email: "top@example.com", Tokens: 5000}},
+		TotalUsers:      41,
+		TotalActualCost: 40,
+		TotalRequests:   44,
+		TotalTokens:     1234,
+	}, nil
+}
+
 func newDashboardRequestTypeTestRouter(repo *dashboardUsageRepoCapture) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
@@ -74,6 +96,7 @@ func newDashboardRequestTypeTestRouter(repo *dashboardUsageRepoCapture) *gin.Eng
 	router.GET("/admin/dashboard/trend", handler.GetUsageTrend)
 	router.GET("/admin/dashboard/models", handler.GetModelStats)
 	router.GET("/admin/dashboard/users-ranking", handler.GetUserSpendingRanking)
+	router.GET("/admin/usage/ranking", handler.GetUserTokenUsageRanking)
 	return router
 }
 
@@ -198,4 +221,21 @@ func TestDashboardUsersRankingLimitAndCache(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec2.Code)
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
+}
+
+func TestDashboardUserTokenUsageRankingPagination(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/ranking?page=2&page_size=500&start_date=2025-01-01&end_date=2025-01-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 2, repo.tokenRankingPage)
+	require.Equal(t, 100, repo.tokenRankingSize)
+	require.Contains(t, rec.Body.String(), "\"rank\":21")
+	require.Contains(t, rec.Body.String(), "\"top_users\"")
+	require.Contains(t, rec.Body.String(), "\"total\":41")
+	require.Contains(t, rec.Body.String(), "\"page_size\":100")
 }

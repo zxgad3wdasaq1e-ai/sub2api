@@ -542,20 +542,20 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 
 // ModelMarketEntry represents a single model shown in the model market.
 type ModelMarketEntry struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Type            string    `json:"type"`
-	TypeLabel       string    `json:"type_label,omitempty"`
-	Category        string    `json:"category"`
-	Platform        string    `json:"platform"`
-	InputPrice      *float64  `json:"input_price"`
-	OutputPrice     *float64  `json:"output_price"`
-	CacheWritePrice *float64  `json:"cache_write_price"`
-	CacheReadPrice  *float64  `json:"cache_read_price"`
-	ChannelCount    int       `json:"channel_count"`
-	ChannelIDs      []int64   `json:"channel_ids"`
-	Recommended     bool      `json:"recommended"`
-	PlatformAdapted bool      `json:"platform_adapted"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	TypeLabel       string   `json:"type_label,omitempty"`
+	Category        string   `json:"category"`
+	Platform        string   `json:"platform"`
+	InputPrice      *float64 `json:"input_price"`
+	OutputPrice     *float64 `json:"output_price"`
+	CacheWritePrice *float64 `json:"cache_write_price"`
+	CacheReadPrice  *float64 `json:"cache_read_price"`
+	ChannelCount    int      `json:"channel_count"`
+	ChannelIDs      []int64  `json:"channel_ids"`
+	Recommended     bool     `json:"recommended"`
+	PlatformAdapted bool     `json:"platform_adapted"`
 }
 
 // perTokenToPerMillion converts a per-token price to per-million-tokens price.
@@ -606,7 +606,7 @@ func buildModelMarketEntries(channels []service.AvailableChannel, keyword, categ
 			if !exists {
 				agg = &modelMarketAggregate{
 					entry: ModelMarketEntry{
-						ID:         strings.ToLower(platform) + ":" + name,
+						ID:         strings.ToLower(platform + ":" + name),
 						Name:       name,
 						Platform:   platform,
 						TypeLabel:  platform,
@@ -701,7 +701,7 @@ func (h *ChannelHandler) ListModelMarket(c *gin.Context) {
 	result, activeChannels := buildModelMarketEntries(channels, keyword, category)
 
 	response.Success(c, gin.H{
-		"models":            result,
+		"models":             result,
 		"total":              len(result),
 		"available_channels": activeChannels,
 	})

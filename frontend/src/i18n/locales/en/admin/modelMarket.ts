@@ -3,7 +3,7 @@ export default {
     title: 'Model Market',
     description: 'Supported AI models and pricing information',
     heroBadge: 'Available models and live pricing',
-    searchPlaceholder: 'Search models, channels, platforms, or groups...',
+    searchPlaceholder: 'Search models or platforms...',
     availableModels: 'Available Models',
     availableChannels: 'Available Channels',
     modelCount: '{count} models',

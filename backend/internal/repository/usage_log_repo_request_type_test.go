@@ -718,6 +718,38 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetUserTokenUsageRanking(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	rows := sqlmock.NewRows([]string{
+		"rank", "user_id", "email", "actual_cost", "requests", "tokens",
+		"total_users", "total_actual_cost", "total_requests", "total_tokens",
+	}).
+		AddRow(int64(1), int64(11), "first@example.com", 5.0, int64(3), int64(5000), int64(42), 100.0, int64(80), int64(20000)).
+		AddRow(int64(2), int64(12), "second@example.com", 8.0, int64(4), int64(4000), int64(42), 100.0, int64(80), int64(20000)).
+		AddRow(int64(3), int64(13), "third@example.com", 3.0, int64(2), int64(3000), int64(42), 100.0, int64(80), int64(20000)).
+		AddRow(int64(21), int64(31), "page-two@example.com", 1.0, int64(1), int64(200), int64(42), 100.0, int64(80), int64(20000))
+
+	mock.ExpectQuery("WITH user_usage AS \\(").
+		WithArgs(start, end, 20, 20).
+		WillReturnRows(rows)
+
+	got, err := repo.GetUserTokenUsageRanking(context.Background(), start, end, 2, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), got.TotalUsers)
+	require.Equal(t, int64(20000), got.TotalTokens)
+	require.Len(t, got.TopUsers, 3)
+	require.Equal(t, int64(1), got.TopUsers[0].Rank)
+	require.Equal(t, int64(5000), got.TopUsers[0].Tokens)
+	require.Equal(t, []usagestats.UserTokenUsageRankingItem{
+		{Rank: 21, UserID: 31, Email: "page-two@example.com", ActualCost: 1.0, Requests: 1, Tokens: 200},
+	}, got.Ranking)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestBuildRequestTypeFilterConditionLegacyFallback(t *testing.T) {
 	tests := []struct {
 		name      string

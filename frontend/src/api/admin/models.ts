@@ -2,8 +2,7 @@
  * Admin model market API.
  *
  * Calls the real backend endpoint:
- * GET /api/v1/admin/models?keyword=
- * PUT /api/v1/admin/models/:id
+ * GET /api/v1/admin/models?keyword=&category=
  */
 
 import { apiClient } from '../client'
@@ -11,10 +10,10 @@ import { apiClient } from '../client'
 export type ModelMarketCategory = 'recommended' | 'all' | 'platform'
 
 export interface ModelPricing {
-  input: number
-  output: number
-  cachedInput: number
-  cachedOutput: number
+  input: number | null
+  output: number | null
+  cachedInput: number | null
+  cachedOutput: number | null
 }
 
 export interface ModelMarketModel {
@@ -29,6 +28,7 @@ export interface ModelMarketModel {
   platformAdapted?: boolean
   pricing: ModelPricing
   channelCount?: number
+  channelIds?: number[]
 }
 
 export interface ModelListParams {
@@ -51,12 +51,16 @@ interface RawModelMarketEntry {
   name: string
   type: string
   type_label?: string
+  category?: string
   platform: string
-  input_price: number
-  output_price: number
-  cache_write_price: number
-  cache_read_price: number
+  input_price: number | null
+  output_price: number | null
+  cache_write_price: number | null
+  cache_read_price: number | null
   channel_count: number
+  channel_ids?: number[]
+  recommended?: boolean
+  platform_adapted?: boolean
 }
 
 interface RawModelListResponse {
@@ -65,32 +69,18 @@ interface RawModelListResponse {
   available_channels?: number
 }
 
-/** Platform → display type/label mapping */
-const platformTypeLabelMap: Record<string, { type: string; label: string }> = {
-  anthropic: { type: 'ANTHROPIC', label: 'Anthropic' },
-  openai: { type: 'OPENAI', label: 'OpenAI' },
-  google: { type: 'GEMINI', label: 'Gemini' },
-  gemini: { type: 'GEMINI', label: 'Gemini' },
-  grok: { type: 'GROK', label: 'Grok' },
-  xai: { type: 'GROK', label: 'Grok' },
-}
-
-function getTypeInfo(platform: string): { type: string; label: string } {
-  return platformTypeLabelMap[platform] || { type: 'ADAPTED', label: platform }
-}
-
 function transformModelList(raw: RawModelListResponse): ModelListResponse {
   const models: ModelMarketModel[] = (raw.models || []).map((entry) => {
-    const { type, label } = getTypeInfo(entry.platform)
     return {
       id: entry.id,
       name: entry.name,
-      type,
-      typeLabel: label,
-      category: 'all',
+      type: entry.type || (entry.platform_adapted ? 'ADAPTED' : 'OFFICIAL'),
+      typeLabel: entry.type_label || entry.platform,
+      category: entry.category || 'all',
       platform: entry.platform,
       status: 'available' as const,
-      platformAdapted: true,
+      recommended: entry.recommended === true,
+      platformAdapted: entry.platform_adapted === true,
       pricing: {
         input: entry.input_price,
         output: entry.output_price,
@@ -98,6 +88,7 @@ function transformModelList(raw: RawModelListResponse): ModelListResponse {
         cachedOutput: entry.cache_read_price,
       },
       channelCount: entry.channel_count,
+      channelIds: entry.channel_ids || [],
     }
   })
 
@@ -111,7 +102,10 @@ function transformModelList(raw: RawModelListResponse): ModelListResponse {
 
 export async function getModels(params: ModelListParams = {}): Promise<ModelListResponse> {
   const { data } = await apiClient.get<RawModelListResponse>('/admin/models', {
-    params: { keyword: params.keyword || undefined },
+    params: {
+      keyword: params.keyword || undefined,
+      category: params.category || 'all',
+    },
   })
   return transformModelList(data)
 }

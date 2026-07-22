@@ -176,6 +176,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { getModels, type ModelMarketCategory, type ModelMarketModel } from '@/api/admin/models'
 import { useAppStore } from '@/stores/app'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -188,9 +189,10 @@ type ViewMode = 'grid' | 'list'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const router = useRouter()
 
 const keyword = ref('')
-const category = ref<ModelMarketCategory>('recommended')
+const category = ref<ModelMarketCategory>('all')
 const viewMode = ref<ViewMode>('grid')
 const models = ref<ModelMarketModel[]>([])
 const loading = ref(false)
@@ -216,14 +218,11 @@ async function loadModels(): Promise<void> {
   try {
     const result = await getModels({
       keyword: keyword.value,
+      category: category.value,
     })
     if (seq !== requestSeq) return
-    // Client-side category filtering
-    const filtered = category.value === 'all'
-      ? result.models
-      : result.models.filter((m) => m.platformAdapted === true || m.platform === category.value)
-    models.value = filtered
-    responseTotal.value = filtered.length
+    models.value = result.models
+    responseTotal.value = result.total
     availableChannels.value = result.availableChannels
   } catch (error) {
     if (seq !== requestSeq) return
@@ -240,7 +239,10 @@ function setCategory(nextCategory: ModelMarketCategory): void {
 }
 
 function handleConfigure(model: ModelMarketModel): void {
-  appStore.showInfo(t('admin.modelMarket.configureHint', { name: model.name }))
+  void router.push({
+    name: 'AdminChannels',
+    query: { model: model.name, platform: model.platform },
+  })
 }
 
 watch(category, () => {
