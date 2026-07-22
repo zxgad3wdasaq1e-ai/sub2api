@@ -52,9 +52,7 @@
             <span class="rounded-full bg-primary-50 px-3 py-1 font-medium text-primary-700 dark:bg-primary-500/10 dark:text-primary-300">
               {{ selectedPeriodLabel }}
             </span>
-            <span v-if="ranking?.mock" class="rounded-full bg-amber-50 px-3 py-1 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-              {{ t('admin.usageRanking.mockData') }}
-            </span>
+
           </div>
         </div>
       </section>

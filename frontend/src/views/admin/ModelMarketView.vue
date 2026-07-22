@@ -216,11 +216,14 @@ async function loadModels(): Promise<void> {
   try {
     const result = await getModels({
       keyword: keyword.value,
-      category: category.value,
     })
     if (seq !== requestSeq) return
-    models.value = result.models
-    responseTotal.value = result.total
+    // Client-side category filtering
+    const filtered = category.value === 'all'
+      ? result.models
+      : result.models.filter((m) => m.platformAdapted === true || m.platform === category.value)
+    models.value = filtered
+    responseTotal.value = filtered.length
     availableChannels.value = result.availableChannels
   } catch (error) {
     if (seq !== requestSeq) return

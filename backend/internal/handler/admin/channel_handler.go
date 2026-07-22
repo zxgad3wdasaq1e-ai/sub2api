@@ -538,3 +538,126 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 	models := h.pricingService.ListModelNamesByProvider(provider)
 	response.Success(c, gin.H{"models": models})
 }
+
+// ModelMarketEntry represents a single model shown in the model market.
+type ModelMarketEntry struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	Type             string  `json:"type"`
+	TypeLabel        string  `json:"type_label,omitempty"`
+	Platform         string  `json:"platform"`
+	InputPrice       float64 `json:"input_price"`
+	OutputPrice      float64 `json:"output_price"`
+	CacheWritePrice  float64 `json:"cache_write_price"`
+	CacheReadPrice   float64 `json:"cache_read_price"`
+	ChannelCount     int     `json:"channel_count"`
+}
+
+// perTokenToPerMillion converts a per-token price to per-million-tokens price.
+func perTokenToPerMillion(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v * 1_000_000
+}
+
+// ListModelMarket returns a flat list of all models across all active channels,
+// with aggregated pricing information for the model market page.
+// GET /api/v1/admin/models
+func (h *ChannelHandler) ListModelMarket(c *gin.Context) {
+	ctx := c.Request.Context()
+	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
+
+	// List all active channels
+	channels, _, err := h.channelService.List(ctx, pagination.PaginationParams{
+		Page:      1,
+		PageSize:  1000,
+		SortBy:    "created_at",
+		SortOrder: "desc",
+	}, "active", "")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// Aggregate models across channels, deduplicating by (platform, name)
+	type modelAgg struct {
+		entry        ModelMarketEntry
+		channelCount int
+	}
+	aggregated := make(map[string]*modelAgg) // key: platform|name
+
+	for i := range channels {
+		ch := &channels[i]
+		supportedModels := ch.SupportedModels()
+		for _, sm := range supportedModels {
+			key := sm.Platform + "|" + sm.Name
+			if agg, ok := aggregated[key]; ok {
+				agg.channelCount++
+				// Use the lowest pricing from channels (best deal for market display)
+				if sm.Pricing != nil && sm.Pricing.InputPrice != nil {
+					ip := perTokenToPerMillion(sm.Pricing.InputPrice)
+					if agg.entry.InputPrice == 0 || ip < agg.entry.InputPrice {
+						agg.entry.InputPrice = ip
+					}
+				}
+				if sm.Pricing != nil && sm.Pricing.OutputPrice != nil {
+					op := perTokenToPerMillion(sm.Pricing.OutputPrice)
+					if agg.entry.OutputPrice == 0 || op < agg.entry.OutputPrice {
+						agg.entry.OutputPrice = op
+					}
+				}
+				if sm.Pricing != nil && sm.Pricing.CacheWritePrice != nil {
+					cwp := perTokenToPerMillion(sm.Pricing.CacheWritePrice)
+					if agg.entry.CacheWritePrice == 0 || cwp < agg.entry.CacheWritePrice {
+						agg.entry.CacheWritePrice = cwp
+					}
+				}
+				if sm.Pricing != nil && sm.Pricing.CacheReadPrice != nil {
+					crp := perTokenToPerMillion(sm.Pricing.CacheReadPrice)
+					if agg.entry.CacheReadPrice == 0 || crp < agg.entry.CacheReadPrice {
+						agg.entry.CacheReadPrice = crp
+					}
+				}
+			} else {
+				entry := ModelMarketEntry{
+					ID:         sm.Name,
+					Name:       sm.Name,
+					Type:       "CHANNEL",
+					Platform:   sm.Platform,
+					ChannelCount: 1,
+				}
+				if sm.Pricing != nil {
+					entry.InputPrice = perTokenToPerMillion(sm.Pricing.InputPrice)
+					entry.OutputPrice = perTokenToPerMillion(sm.Pricing.OutputPrice)
+					entry.CacheWritePrice = perTokenToPerMillion(sm.Pricing.CacheWritePrice)
+					entry.CacheReadPrice = perTokenToPerMillion(sm.Pricing.CacheReadPrice)
+				}
+				aggregated[key] = &modelAgg{entry: entry, channelCount: 1}
+			}
+		}
+	}
+
+	// Build result list, optionally filtered by keyword
+	result := make([]ModelMarketEntry, 0, len(aggregated))
+	for _, agg := range aggregated {
+		agg.entry.ChannelCount = agg.channelCount
+		if keyword != "" && !strings.Contains(strings.ToLower(agg.entry.Name), keyword) &&
+			!strings.Contains(strings.ToLower(agg.entry.Platform), keyword) {
+			continue
+		}
+		result = append(result, agg.entry)
+	}
+
+	// Count unique channels
+	uniqueChannels := make(map[int64]struct{})
+	for i := range channels {
+		uniqueChannels[channels[i].ID] = struct{}{}
+	}
+
+	response.Success(c, gin.H{
+		"models":            result,
+		"total":              len(result),
+		"available_channels": len(uniqueChannels),
+	})
+}

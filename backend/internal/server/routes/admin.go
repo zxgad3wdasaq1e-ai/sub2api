@@ -105,6 +105,9 @@ func RegisterAdminRoutes(
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)
 
+		// 模型广场
+		admin.GET("/models", h.Admin.Channel.ListModelMarket)
+
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
 
