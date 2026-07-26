@@ -132,6 +132,30 @@ describe('PaymentStatusPanel', () => {
     openSpy.mockRestore()
   })
 
+  it('renders a provider QR image directly without encoding the data URI again', async () => {
+    const qrImage = 'data:image/png;base64,ZmFrZS13ZWNoYXQtcXI='
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: qrImage,
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'wxpay',
+        orderType: 'balance',
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('img.h-\\[220px\\]').attributes('src')).toBe(qrImage)
+    expect(wrapper.find('canvas').exists()).toBe(false)
+    expect(toCanvas).not.toHaveBeenCalled()
+  })
+
   it('uses generic QR copy for custom methods that contain built-in names', async () => {
     const wrapper = mount(PaymentStatusPanel, {
       props: {

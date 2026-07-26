@@ -129,7 +129,8 @@
               </div>
             </div>
             <div :class="['relative rounded-lg border-2 p-4', qrBorderClass]">
-              <canvas ref="qrCanvas" class="mx-auto"></canvas>
+              <img v-if="qrIsImage" :src="qrUrl" alt="" class="mx-auto h-[220px] w-[220px] object-contain" />
+              <canvas v-else ref="qrCanvas" class="mx-auto"></canvas>
               <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <span :class="['rounded-full p-2 shadow ring-2 ring-white', qrLogoBgClass]">
                   <img :src="qrLogoIcon" alt="" class="h-5 w-5 brightness-0 invert" />
@@ -171,7 +172,8 @@
         <div class="flex flex-col items-center space-y-4">
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ scanTitle }}</p>
           <div :class="['relative rounded-lg border-2 p-4', qrBorderClass]">
-            <canvas ref="qrCanvas" class="mx-auto"></canvas>
+            <img v-if="qrIsImage" :src="qrUrl" alt="" class="mx-auto h-[220px] w-[220px] object-contain" />
+            <canvas v-else ref="qrCanvas" class="mx-auto"></canvas>
             <!-- Brand logo overlay -->
             <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
               <span :class="['rounded-full p-2 shadow ring-2 ring-white', qrLogoBgClass]">
@@ -293,6 +295,7 @@ const VERIFY_RETRY_MAX_ATTEMPTS = 6
 
 const isAlipay = computed(() => isBuiltInAlipayMethod(props.paymentType))
 const isWxpay = computed(() => isBuiltInWxpayMethod(props.paymentType))
+const qrIsImage = computed(() => /^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(qrUrl.value.trim()))
 const isMobileAlipayDeepLink = computed(() => props.mobileAlipayDeepLink === true && isAlipay.value && !!qrUrl.value)
 const showQRCode = computed(() => !!qrUrl.value && (!isMobileAlipayDeepLink.value || deepLinkFallbackVisible.value))
 
@@ -360,7 +363,7 @@ function setOutcome(next: PaymentOutcome) {
 
 async function renderQR() {
   await nextTick()
-  if (!showQRCode.value || !qrCanvas.value || !qrUrl.value) return
+  if (!showQRCode.value || qrIsImage.value || !qrCanvas.value || !qrUrl.value) return
   await QRCode.toCanvas(qrCanvas.value, qrUrl.value, {
     width: 220, margin: 2,
     errorCorrectionLevel: 'M',

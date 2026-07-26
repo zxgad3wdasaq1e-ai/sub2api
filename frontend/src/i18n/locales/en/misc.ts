@@ -289,6 +289,8 @@ export default {
     amountLabel: 'Amount',
     paymentAmount: 'Payment Amount',
     creditedBalance: 'Credited Balance',
+    estimatedCredited: 'Estimated Credit',
+    rechargeMultiplier: 'Credit Multiplier',
     quickAmounts: 'Quick Amounts',
     customAmount: 'Custom Amount',
     enterAmount: 'Enter amount',
