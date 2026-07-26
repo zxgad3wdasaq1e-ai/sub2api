@@ -155,3 +155,41 @@ func TestBuildPlatformSections_GroupsByPlatform(t *testing.T) {
 	require.Len(t, sections[0].SupportedModels, 1)
 	require.Equal(t, "claude-sonnet-4-6", sections[0].SupportedModels[0].Name)
 }
+
+func TestBuildUserPricedModels_AggregatesReachableGroups(t *testing.T) {
+	price := 0.3
+	channels := []service.AvailableChannel{
+		{
+			Status: service.StatusActive,
+			Groups: []service.AvailableGroupRef{
+				{ID: 2, Platform: "openai"},
+				{ID: 1, Platform: "openai"},
+				{ID: 3, Platform: "anthropic"},
+			},
+			SupportedModels: []service.SupportedModel{
+				{Name: "gpt-image-2", Platform: "openai", Pricing: &service.ChannelModelPricing{PerRequestPrice: &price}},
+				{Name: "unpriced", Platform: "openai"},
+			},
+		},
+		{
+			Status: service.StatusActive,
+			Groups: []service.AvailableGroupRef{{ID: 4, Platform: "openai"}},
+			SupportedModels: []service.SupportedModel{
+				{Name: "GPT-IMAGE-2", Platform: "openai", Pricing: &service.ChannelModelPricing{PerRequestPrice: &price}},
+			},
+		},
+		{
+			Status: "inactive",
+			Groups: []service.AvailableGroupRef{{ID: 5, Platform: "openai"}},
+			SupportedModels: []service.SupportedModel{
+				{Name: "inactive", Platform: "openai", Pricing: &service.ChannelModelPricing{PerRequestPrice: &price}},
+			},
+		},
+	}
+
+	models := buildUserPricedModels(channels, map[int64]struct{}{1: {}, 3: {}, 4: {}})
+	require.Len(t, models, 1)
+	require.Equal(t, "gpt-image-2", models[0].Name)
+	require.Equal(t, []string{"openai"}, models[0].Platforms)
+	require.Equal(t, []int64{1, 4}, models[0].GroupIDs)
+}

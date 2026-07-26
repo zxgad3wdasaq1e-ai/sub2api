@@ -8,6 +8,7 @@ export interface StudioImage {
   model: string
   mode: ImageMode
   size: string
+  aspectRatio?: string
   quality: string
   outputFormat: string
   createdAt: number
@@ -22,6 +23,11 @@ export interface ImageJob {
   model: string
   mode: ImageMode
   size: string
+  aspectRatio: string
+  apiKeyId: number
+  quality: string
+  outputFormat: string
+  references?: File[]
   status: ImageJobStatus
   createdAt: number
   error?: string

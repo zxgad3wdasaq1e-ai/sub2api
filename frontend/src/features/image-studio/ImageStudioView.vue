@@ -2,13 +2,10 @@
   <AppLayout>
     <div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-card dark:border-dark-700 dark:bg-dark-900">
       <header class="flex flex-col gap-4 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-dark-700">
-        <div class="flex items-center gap-3">
-          <div class="flex h-10 w-10 items-center justify-center rounded-md bg-rose-600 text-white">
-            <Icon name="sparkles" size="lg" />
-          </div>
+        <div class="flex items-center">
           <div>
             <h1 class="text-lg font-bold text-gray-950 dark:text-white">AI 生图工作台</h1>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ selectedApiKey ? `${selectedApiKey.name} · ${form.model || '选择模型'}` : '等待可用 API 密钥' }}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ selectedApiKey ? `${selectedApiKey.name} · ${form.model}` : modelBindingMessage }}</p>
           </div>
         </div>
         <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
@@ -32,18 +29,19 @@
           <form class="space-y-4" @submit.prevent="submitJobs">
             <label class="block">
               <span class="input-label">API 密钥</span>
-              <select v-model.number="form.apiKeyId" class="input rounded-md" :disabled="loadingKeys">
-                <option :value="0">{{ loadingKeys ? '正在读取密钥...' : '请选择密钥' }}</option>
-                <option v-for="key in imageApiKeys" :key="key.id" :value="key.id">{{ key.name || `API Key #${key.id}` }}</option>
+              <select v-model.number="form.apiKeyId" class="input rounded-md" :disabled="loadingKeys || !compatibleImageKeys.length">
+                <option :value="0">{{ loadingKeys ? '正在读取密钥...' : '自动选择可用密钥' }}</option>
+                <option v-for="key in compatibleImageKeys" :key="key.id" :value="key.id">{{ key.name || `API Key #${key.id}` }}</option>
               </select>
             </label>
 
             <label class="block">
               <span class="input-label">模型</span>
-              <input v-model.trim="form.model" class="input rounded-md" list="image-studio-models" placeholder="gpt-image-2" @change="trimReferencesToLimit" />
-              <datalist id="image-studio-models">
-                <option v-for="model in imageModels" :key="model" :value="model" />
-              </datalist>
+              <select v-model="form.model" class="input rounded-md" :disabled="!imageModels.length">
+                <option v-if="!imageModels.length" value="">暂无已定价生图模型</option>
+                <option v-for="model in imageModels" :key="model" :value="model">{{ model }}</option>
+              </select>
+              <p v-if="modelBindingMessage" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ modelBindingMessage }}</p>
             </label>
 
             <label class="block">
@@ -72,14 +70,17 @@
             </div>
 
             <fieldset>
-              <legend class="input-label">画面尺寸</legend>
-              <div class="grid grid-cols-3 overflow-hidden rounded-md border border-gray-300 dark:border-dark-600">
-                <label v-for="option in sizeOptions" :key="option.value" class="cursor-pointer border-r border-gray-300 last:border-r-0 dark:border-dark-600">
-                  <input v-model="form.size" class="peer sr-only" type="radio" :value="option.value" />
-                  <span class="flex h-11 flex-col items-center justify-center text-xs text-gray-500 peer-checked:bg-primary-600 peer-checked:text-white dark:text-gray-400">
-                    <b>{{ option.label }}</b><small>{{ option.value }}</small>
+              <legend class="input-label">选择比例</legend>
+              <div class="overflow-x-auto rounded-md border border-gray-300 bg-white dark:border-dark-600 dark:bg-dark-900">
+                <div class="grid min-w-[342px] grid-cols-9">
+                <label v-for="option in aspectRatioOptions" :key="option.value" class="cursor-pointer border-r border-gray-200 last:border-r-0 dark:border-dark-700">
+                  <input v-model="form.aspectRatio" class="peer sr-only" type="radio" :value="option.value" />
+                  <span class="flex h-16 flex-col items-center justify-center gap-1.5 text-xs text-gray-500 peer-checked:bg-gray-100 peer-checked:text-gray-950 dark:text-gray-400 dark:peer-checked:bg-dark-700 dark:peer-checked:text-white">
+                    <i class="block rounded-[3px] border-2 border-current" :style="{ width: `${option.iconWidth}px`, height: `${option.iconHeight}px` }"></i>
+                    <b class="font-medium">{{ option.label }}</b>
                   </span>
                 </label>
+                </div>
               </div>
             </fieldset>
 
@@ -145,7 +146,7 @@
                 </span>
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{{ job.prompt }}</p>
-                  <p class="truncate text-xs text-gray-400">{{ job.error || `${job.mode === 'edit' ? '图生图' : '文生图'} · ${job.size} · ${jobStatusLabel(job.status)}` }}</p>
+                  <p class="truncate text-xs text-gray-400">{{ job.error || `${job.mode === 'edit' ? '图生图' : '文生图'} · ${job.aspectRatio === 'auto' ? '智能' : job.aspectRatio} · ${jobStatusLabel(job.status)}` }}</p>
                 </div>
                 <button v-if="job.status === 'queued' || job.status === 'running'" type="button" class="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-red-500 dark:hover:bg-dark-700" title="取消任务" @click="cancelJob(job)">
                   <Icon name="x" size="sm" />
@@ -180,7 +181,7 @@
                 <div class="p-3">
                   <p class="line-clamp-2 min-h-10 text-sm leading-5 text-gray-700 dark:text-gray-200">{{ image.prompt }}</p>
                   <div class="mt-2 flex items-center justify-between gap-2 text-xs text-gray-400">
-                    <span>{{ image.mode === 'edit' ? '图生图' : '文生图' }} · {{ image.size }}</span>
+                    <span>{{ image.mode === 'edit' ? '图生图' : '文生图' }} · {{ image.aspectRatio === 'auto' ? '智能' : (image.aspectRatio || image.size) }}</span>
                     <span class="text-emerald-600 dark:text-emerald-400">{{ expiryLabel(image.expiresAt) }}</span>
                   </div>
                 </div>
@@ -195,7 +196,7 @@
               <div>
                 <i class="mb-4 block h-1 w-12 bg-rose-600"></i>
                 <h3 class="text-xl font-bold text-gray-950 dark:text-white">开始第一张创作</h3>
-                <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">在左侧填写画面描述，任务会进入 4 路并发队列，结果自动保存在当前浏览器。</p>
+                <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">在左侧填写画面描述，任务会进入 4 路并发队列，结果自动保留 15 天。</p>
               </div>
             </div>
           </div>
@@ -212,7 +213,7 @@
           <p class="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700 dark:text-gray-200">{{ selectedImage.revisedPrompt || selectedImage.prompt }}</p>
           <dl class="mt-5 space-y-2 border-t border-gray-200 pt-4 text-sm dark:border-dark-700">
             <div class="flex justify-between gap-4"><dt class="text-gray-400">模式</dt><dd>{{ selectedImage.mode === 'edit' ? '图生图' : '文生图' }}</dd></div>
-            <div class="flex justify-between gap-4"><dt class="text-gray-400">尺寸</dt><dd>{{ selectedImage.size }}</dd></div>
+            <div class="flex justify-between gap-4"><dt class="text-gray-400">比例</dt><dd>{{ selectedImage.aspectRatio === 'auto' ? '智能' : (selectedImage.aspectRatio || selectedImage.size) }}</dd></div>
             <div class="flex justify-between gap-4"><dt class="text-gray-400">质量</dt><dd>{{ selectedImage.quality }}</dd></div>
             <div class="flex justify-between gap-4"><dt class="text-gray-400">创建时间</dt><dd>{{ formatDate(selectedImage.createdAt) }}</dd></div>
           </dl>
@@ -232,11 +233,13 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { keysAPI } from '@/api/keys'
+import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
 import type { ApiKey } from '@/types'
-import { generateImage, listGatewayModels, type GenerateImageOptions, type GatewayModel } from '@/features/ai/gateway'
-import { isLikelyImageModel, referenceImageLimitForModel } from './capabilities'
-import { cleanupExpiredStudioImages, deleteStudioImage, loadStudioImages, saveStudioImage } from './storage'
+import { generateImage, type GenerateImageOptions } from '@/features/ai/gateway'
+import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
+import { imageSizeForAspectRatio, isLikelyImageModel, referenceImageLimitForModel, type ImageAspectRatio } from './capabilities'
+import { cleanupExpiredStudioImages, cleanupExpiredStudioJobs, deleteStudioImage, loadStudioImages, loadStudioJobs, saveStudioImage, saveStudioJob } from './storage'
 import type { ImageJob, ImageJobStatus, ImageMode, StudioImage } from './types'
 
 interface ReferenceDraft {
@@ -252,11 +255,16 @@ interface QueuePayload {
 
 const RETENTION_MS = 15 * 24 * 60 * 60 * 1000
 const MAX_CONCURRENCY = 4
-const DEFAULT_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'grok-imagine-image', 'dall-e-3']
-const sizeOptions = [
-  { label: '方形', value: '1024x1024' },
-  { label: '横向', value: '1536x1024' },
-  { label: '竖向', value: '1024x1536' },
+const aspectRatioOptions = [
+  { label: '智能', value: 'auto' as ImageAspectRatio, iconWidth: 17, iconHeight: 17 },
+  { label: '21:9', value: '21:9' as ImageAspectRatio, iconWidth: 22, iconHeight: 8 },
+  { label: '16:9', value: '16:9' as ImageAspectRatio, iconWidth: 22, iconHeight: 10 },
+  { label: '3:2', value: '3:2' as ImageAspectRatio, iconWidth: 20, iconHeight: 13 },
+  { label: '4:3', value: '4:3' as ImageAspectRatio, iconWidth: 18, iconHeight: 14 },
+  { label: '1:1', value: '1:1' as ImageAspectRatio, iconWidth: 16, iconHeight: 16 },
+  { label: '3:4', value: '3:4' as ImageAspectRatio, iconWidth: 14, iconHeight: 18 },
+  { label: '2:3', value: '2:3' as ImageAspectRatio, iconWidth: 13, iconHeight: 20 },
+  { label: '9:16', value: '9:16' as ImageAspectRatio, iconWidth: 10, iconHeight: 22 },
 ]
 
 const appStore = useAppStore()
@@ -265,13 +273,13 @@ const form = reactive({
   model: 'gpt-image-2',
   mode: 'text' as ImageMode,
   prompt: '',
-  size: '1024x1024',
+  aspectRatio: 'auto' as ImageAspectRatio,
   quality: 'auto',
   outputFormat: 'png',
   count: 1,
 })
 const apiKeys = ref<ApiKey[]>([])
-const models = ref<GatewayModel[]>([])
+const models = ref<UserPricedModel[]>([])
 const images = ref<StudioImage[]>([])
 const jobs = ref<ImageJob[]>([])
 const references = ref<ReferenceDraft[]>([])
@@ -281,16 +289,19 @@ const referenceInput = ref<HTMLInputElement | null>(null)
 const queuePayloads = new Map<string, QueuePayload>()
 const objectUrls = new Map<string, string>()
 
-const imageApiKeys = computed(() => apiKeys.value.filter((key) => {
+const isImageKey = (key: ApiKey) => {
   if (key.group?.allow_image_generation === false) return false
   const platform = key.group?.platform?.toLowerCase()
   return !platform || platform === 'openai' || platform === 'grok'
-}))
-const selectedApiKey = computed(() => imageApiKeys.value.find((key) => key.id === Number(form.apiKeyId)) || null)
-const imageModels = computed(() => {
-  const discovered = models.value.map((model) => model.id).filter(isLikelyImageModel)
-  return [...new Set([...discovered, ...DEFAULT_IMAGE_MODELS])]
-})
+}
+const compatibleImageKeys = computed(() => compatibleApiKeys(apiKeys.value, models.value, form.model, isImageKey))
+const selectedApiKey = computed(() => selectCompatibleApiKey(apiKeys.value, models.value, form.model, form.apiKeyId, isImageKey))
+const imageModels = computed(() => models.value.map((model) => model.name).filter(isLikelyImageModel))
+const modelBindingMessage = computed(() => selectedApiKey.value
+  ? ''
+  : form.model.trim()
+    ? `请先创建或绑定「${form.model}」所属分组的 API 密钥`
+    : '请选择一个已定价生图模型')
 const referenceLimit = computed(() => referenceImageLimitForModel(form.model))
 const activeCount = computed(() => jobs.value.filter((job) => job.status === 'running').length)
 const queuedCount = computed(() => jobs.value.filter((job) => job.status === 'queued').length)
@@ -301,7 +312,11 @@ const canSubmit = computed(() => Boolean(
   (form.mode === 'text' || (references.value.length > 0 && referenceLimit.value > 0)),
 ))
 
-watch(() => form.apiKeyId, () => void loadModels())
+watch([() => form.model, apiKeys, models], () => {
+  const nextID = selectedApiKey.value?.id || 0
+  if (form.apiKeyId !== nextID) form.apiKeyId = nextID
+  trimReferencesToLimit()
+}, { deep: true })
 watch(() => form.mode, (mode) => {
   if (mode === 'text') clearReferences()
 })
@@ -311,7 +326,6 @@ async function loadKeys() {
   try {
     const response = await keysAPI.list(1, 100, { status: 'active', sort_by: 'created_at', sort_order: 'desc' })
     apiKeys.value = response.items || []
-    if (!selectedApiKey.value && imageApiKeys.value.length) form.apiKeyId = imageApiKeys.value[0].id
     await loadModels()
   } catch (error: any) {
     appStore.showError(error?.message || '读取 API 密钥失败')
@@ -321,16 +335,15 @@ async function loadKeys() {
 }
 
 async function loadModels() {
-  if (!selectedApiKey.value) {
-    models.value = []
-    return
-  }
   try {
-    models.value = await listGatewayModels(selectedApiKey.value.key)
-    if (!form.model && imageModels.value.length) form.model = imageModels.value[0]
+    models.value = await userChannelsAPI.getPricedModels()
+    const firstImageModel = models.value.find((model) => isLikelyImageModel(model.name))
+    if (!imageModels.value.some((model) => model.toLowerCase() === form.model.trim().toLowerCase())) {
+      form.model = firstImageModel?.name || ''
+    }
   } catch (error: any) {
     models.value = []
-    appStore.showError(error?.message || '读取模型列表失败')
+    appStore.showError(error?.message || '读取已定价生图模型失败')
   }
 }
 
@@ -375,14 +388,15 @@ function trimReferencesToLimit() {
   appStore.showInfo(`已按模型上限保留 ${referenceLimit.value} 张参考图`)
 }
 
-function submitJobs() {
+async function submitJobs() {
   if (!canSubmit.value || !selectedApiKey.value) return
+  const size = imageSizeForAspectRatio(form.aspectRatio)
   const options: Omit<GenerateImageOptions, 'signal'> = {
     apiKey: selectedApiKey.value.key,
     model: form.model.trim(),
     prompt: form.prompt.trim(),
     mode: form.mode,
-    size: form.size,
+    size,
     quality: form.quality,
     outputFormat: form.outputFormat,
     references: form.mode === 'edit' ? references.value.map((reference) => reference.file) : undefined,
@@ -394,11 +408,17 @@ function submitJobs() {
       model: options.model,
       mode: options.mode,
       size: options.size,
+      aspectRatio: form.aspectRatio,
+      apiKeyId: selectedApiKey.value.id,
+      quality: options.quality,
+      outputFormat: options.outputFormat,
+      references: options.references,
       status: 'queued',
       createdAt: Date.now() + index,
     }
     jobs.value.unshift(job)
     queuePayloads.set(job.id, { job, options })
+    await saveStudioJob(job)
   }
   appStore.showSuccess(`${form.count} 个生图任务已加入队列`)
   pumpQueue()
@@ -417,9 +437,19 @@ async function runJob(payload: QueuePayload) {
   const controller = new AbortController()
   job.abortController = controller
   job.status = 'running'
+  await saveStudioJob(job)
   try {
     const results = await generateImage({ ...options, signal: controller.signal })
     for (const result of results) {
+      let blob = result.blob
+      if (!blob && result.url) {
+        try {
+          const response = await fetch(result.url)
+          if (response.ok) blob = await response.blob()
+        } catch {
+          // Keep the provider URL when it cannot be cached due to CORS.
+        }
+      }
       const image: StudioImage = {
         id: crypto.randomUUID(),
         prompt: options.prompt,
@@ -427,17 +457,19 @@ async function runJob(payload: QueuePayload) {
         model: options.model,
         mode: options.mode,
         size: options.size,
+        aspectRatio: job.aspectRatio,
         quality: options.quality,
         outputFormat: options.outputFormat,
         createdAt: Date.now(),
         expiresAt: Date.now() + RETENTION_MS,
-        blob: result.blob,
+        blob,
         remoteUrl: result.url,
       }
       images.value.unshift(image)
       await saveStudioImage(image)
     }
     job.status = 'completed'
+    await saveStudioJob(job)
   } catch (error: any) {
     if (error?.name === 'AbortError') job.status = 'canceled'
     else {
@@ -445,6 +477,7 @@ async function runJob(payload: QueuePayload) {
       job.error = error?.message || '图片生成失败'
       appStore.showError(job.error || '图片生成失败')
     }
+    await saveStudioJob(job)
   } finally {
     job.abortController = undefined
     queuePayloads.delete(job.id)
@@ -456,6 +489,7 @@ function cancelJob(job: ImageJob) {
   if (job.status === 'queued') {
     job.status = 'canceled'
     queuePayloads.delete(job.id)
+    void saveStudioJob(job)
   } else if (job.status === 'running') {
     job.abortController?.abort()
   }
@@ -473,13 +507,51 @@ function jobStatusClass(status: ImageJobStatus): string {
 }
 
 function imageUrl(image: StudioImage): string {
-  if (image.remoteUrl) return image.remoteUrl
-  if (!image.blob) return ''
-  const existing = objectUrls.get(image.id)
-  if (existing) return existing
-  const next = URL.createObjectURL(image.blob)
-  objectUrls.set(image.id, next)
-  return next
+  if (image.blob) {
+    const existing = objectUrls.get(image.id)
+    if (existing) return existing
+    const next = URL.createObjectURL(image.blob)
+    objectUrls.set(image.id, next)
+    return next
+  }
+  return image.remoteUrl || ''
+}
+
+async function reloadJobs() {
+  await cleanupExpiredStudioJobs()
+  const storedJobs = await loadStudioJobs()
+  jobs.value = storedJobs.map((job) => {
+    if (job.status !== 'running') return job
+    return { ...job, status: 'failed' as const, error: '页面刷新前任务状态无法确认，请重新生成' }
+  })
+  queuePayloads.clear()
+  for (const job of jobs.value) {
+    if (job.status !== 'queued') {
+      if (job.status === 'failed' && storedJobs.find((item) => item.id === job.id)?.status === 'running') void saveStudioJob(job)
+      continue
+    }
+    const key = apiKeys.value.find((item) => item.id === job.apiKeyId && isImageKey(item))
+    if (!key) {
+      job.status = 'failed'
+      job.error = '原 API 密钥已不可用，请重新选择模型和密钥'
+      void saveStudioJob(job)
+      continue
+    }
+    queuePayloads.set(job.id, {
+      job,
+      options: {
+        apiKey: key.key,
+        model: job.model,
+        prompt: job.prompt,
+        mode: job.mode,
+        size: job.size,
+        quality: job.quality,
+        outputFormat: job.outputFormat,
+        references: job.references,
+      },
+    })
+  }
+  pumpQueue()
 }
 
 async function reloadImages() {
@@ -519,7 +591,8 @@ function formatDate(value: number): string {
 }
 
 onMounted(async () => {
-  await Promise.all([loadKeys(), reloadImages()])
+  await loadKeys()
+  await Promise.all([reloadImages(), reloadJobs()])
 })
 
 onBeforeUnmount(() => {

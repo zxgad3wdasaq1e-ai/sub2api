@@ -105,8 +105,12 @@ func (c *openAIImageOutputCounter) addDataArray(data gjson.Result) {
 		if !item.IsObject() {
 			continue
 		}
+		if isFailedImageOutput(item) {
+			continue
+		}
 		hasImageOutput := strings.TrimSpace(item.Get("url").String()) != "" ||
-			strings.TrimSpace(item.Get("b64_json").String()) != ""
+			strings.TrimSpace(item.Get("b64_json").String()) != "" ||
+			strings.TrimSpace(item.Get("result").String()) != ""
 		if !hasImageOutput {
 			continue
 		}
@@ -135,6 +139,9 @@ func (c *openAIImageOutputCounter) addOutputArray(output gjson.Result) {
 
 func (c *openAIImageOutputCounter) addImageOutputItem(item gjson.Result) {
 	if !item.Exists() || !item.IsObject() {
+		return
+	}
+	if isFailedImageOutput(item) {
 		return
 	}
 	itemType := strings.TrimSpace(item.Get("type").String())
@@ -177,6 +184,16 @@ func (c *openAIImageOutputCounter) addImageOutputItem(item gjson.Result) {
 		c.seenSizes[key] = size
 	}
 	c.count++
+}
+
+func isFailedImageOutput(item gjson.Result) bool {
+	status := strings.ToLower(strings.TrimSpace(item.Get("status").String()))
+	switch status {
+	case "failed", "error", "cancelled", "canceled", "rejected":
+		return true
+	default:
+		return false
+	}
 }
 
 func hashOpenAIImageOutputResult(result string) string {
