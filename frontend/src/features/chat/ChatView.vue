@@ -55,10 +55,11 @@
 
         <div class="border-t border-gray-200 p-3 dark:border-dark-700">
           <label class="mb-1 block text-xs text-gray-500 dark:text-gray-400">API 密钥</label>
-          <select v-model.number="preferences.apiKeyId" class="input rounded-md py-2" :disabled="loadingKeys">
+          <select v-model.number="preferences.apiKeyId" class="input rounded-md py-2" :disabled="loadingKeys || !compatibleKeys.length">
             <option :value="null">{{ loadingKeys ? '正在读取密钥...' : '自动选择可用密钥' }}</option>
-            <option v-for="key in apiKeys" :key="key.id" :value="key.id">{{ key.name || `API Key #${key.id}` }}</option>
+            <option v-for="key in compatibleKeys" :key="key.id" :value="key.id">{{ key.name || `API Key #${key.id}` }}</option>
           </select>
+          <p v-if="modelBindingMessage" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ modelBindingMessage }}</p>
         </div>
       </aside>
 
@@ -71,15 +72,15 @@
             <div class="min-w-0">
               <p class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ currentConversation?.title || 'AI 对话' }}</p>
               <p class="text-xs" :class="selectedApiKey ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
-                {{ selectedApiKey ? `已连接 ${selectedApiKey.name}` : '需要可用 API 密钥' }}
+                {{ selectedApiKey ? `已连接 ${selectedApiKey.name}` : modelBindingMessage }}
               </p>
             </div>
           </div>
           <div class="w-44 sm:w-64">
-            <input v-model.trim="currentModel" class="input rounded-md py-2" list="chat-models" aria-label="聊天模型" placeholder="选择或输入模型" />
-            <datalist id="chat-models">
-              <option v-for="model in models" :key="model.id" :value="model.id" />
-            </datalist>
+            <select v-model="currentModel" class="input rounded-md py-2" aria-label="聊天模型" :disabled="!models.length">
+              <option v-if="!models.length" value="">暂无已定价模型</option>
+              <option v-for="model in models" :key="model.name" :value="model.name">{{ model.name }}</option>
+            </select>
           </div>
         </header>
 
@@ -157,7 +158,9 @@
       <div class="space-y-5">
         <label class="block">
           <span class="input-label">默认模型</span>
-          <input v-model.trim="preferences.defaultModel" class="input" list="chat-models" placeholder="gpt-5.4" />
+          <select v-model="preferences.defaultModel" class="input" :disabled="!models.length">
+            <option v-for="model in models" :key="model.name" :value="model.name">{{ model.name }}</option>
+          </select>
         </label>
         <label class="block">
           <span class="input-label">系统提示词</span>
@@ -184,9 +187,11 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { keysAPI } from '@/api/keys'
+import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
 import type { ApiKey } from '@/types'
-import { listGatewayModels, streamChatCompletion, type ChatCompletionMessage, type GatewayModel } from '@/features/ai/gateway'
+import { streamChatCompletion, type ChatCompletionMessage } from '@/features/ai/gateway'
+import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
 import { loadChatPreferences, loadConversations, saveChatPreferences, saveConversations } from './storage'
 import type { ChatAttachment, ChatMessage, ChatPreferences, Conversation } from './types'
 
@@ -195,7 +200,7 @@ const preferences = ref<ChatPreferences>(loadChatPreferences())
 const conversations = ref<Conversation[]>(loadConversations())
 const activeId = ref('')
 const apiKeys = ref<ApiKey[]>([])
-const models = ref<GatewayModel[]>([])
+const models = ref<UserPricedModel[]>([])
 const loadingKeys = ref(false)
 const busy = ref(false)
 const mobileOpen = ref(false)
@@ -244,8 +249,14 @@ const currentModel = computed({
   },
 })
 const selectedApiKey = computed(() => {
-  return apiKeys.value.find((key) => key.id === Number(preferences.value.apiKeyId)) || apiKeys.value[0] || null
+  return selectCompatibleApiKey(apiKeys.value, models.value, currentModel.value, preferences.value.apiKeyId)
 })
+const compatibleKeys = computed(() => compatibleApiKeys(apiKeys.value, models.value, currentModel.value))
+const modelBindingMessage = computed(() => selectedApiKey.value
+  ? ''
+  : currentModel.value
+    ? `请先创建或绑定「${currentModel.value}」所属分组的 API 密钥`
+    : '请选择一个已定价模型')
 const filteredConversations = computed(() => {
   const query = conversationQuery.value.trim().toLowerCase()
   return [...conversations.value]
@@ -279,8 +290,12 @@ watch(conversations, () => {
 
 watch(() => preferences.value.apiKeyId, () => {
   saveChatPreferences(preferences.value)
-  void loadModels()
 })
+
+watch([currentModel, apiKeys, models], () => {
+  const nextID = selectedApiKey.value?.id ?? null
+  if (preferences.value.apiKeyId !== nextID) preferences.value.apiKeyId = nextID
+}, { deep: true })
 
 function renderMarkdown(content: string): string {
   return DOMPurify.sanitize(marked.parse(content, { breaks: true }) as string)
@@ -324,7 +339,6 @@ async function loadKeys() {
   try {
     const response = await keysAPI.list(1, 100, { status: 'active', sort_by: 'created_at', sort_order: 'desc' })
     apiKeys.value = response.items || []
-    if (!selectedApiKey.value && apiKeys.value.length) preferences.value.apiKeyId = apiKeys.value[0].id
     await loadModels()
   } catch (error: any) {
     appStore.showError(error?.message || '读取 API 密钥失败')
@@ -334,17 +348,14 @@ async function loadKeys() {
 }
 
 async function loadModels() {
-  const key = selectedApiKey.value
-  if (!key) {
-    models.value = []
-    return
-  }
   try {
-    models.value = await listGatewayModels(key.key)
-    if (!currentModel.value && models.value.length) currentModel.value = models.value[0].id
+    models.value = await userChannelsAPI.getPricedModels()
+    if (!models.value.some((model) => model.name.toLowerCase() === currentModel.value.trim().toLowerCase())) {
+      currentModel.value = models.value[0]?.name || ''
+    }
   } catch (error: any) {
     models.value = []
-    appStore.showError(error?.message || '读取模型列表失败')
+    appStore.showError(error?.message || '读取已定价模型失败')
   }
 }
 

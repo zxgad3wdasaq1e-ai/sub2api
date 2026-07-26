@@ -68,6 +68,12 @@ export interface UserAvailableChannel {
   platforms: UserChannelPlatformSection[]
 }
 
+export interface UserPricedModel {
+  name: string
+  platforms: string[]
+  group_ids: number[]
+}
+
 /** 列出当前用户可见的「可用渠道」（与 /groups/available 保持一致，返回平数组）。 */
 export async function getAvailable(options?: { signal?: AbortSignal }): Promise<UserAvailableChannel[]> {
   const { data } = await apiClient.get<UserAvailableChannel[]>('/channels/available', {
@@ -76,6 +82,14 @@ export async function getAvailable(options?: { signal?: AbortSignal }): Promise<
   return data
 }
 
-export const userChannelsAPI = { getAvailable }
+/** Model catalog used by the built-in AI tools, independent of channel-page visibility. */
+export async function getPricedModels(options?: { signal?: AbortSignal }): Promise<UserPricedModel[]> {
+  const { data } = await apiClient.get<UserPricedModel[]>('/channels/models', {
+    signal: options?.signal
+  })
+  return data
+}
+
+export const userChannelsAPI = { getAvailable, getPricedModels }
 
 export default userChannelsAPI
