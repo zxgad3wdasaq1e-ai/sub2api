@@ -191,7 +191,7 @@ import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
 import type { ApiKey } from '@/types'
 import { streamChatCompletion, type ChatCompletionMessage } from '@/features/ai/gateway'
-import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
+import { compatibleApiKeys, findPricedModel, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
 import { loadChatPreferences, loadConversations, saveChatPreferences, saveConversations } from './storage'
 import type { ChatAttachment, ChatMessage, ChatPreferences, Conversation } from './types'
 
@@ -350,9 +350,10 @@ async function loadKeys() {
 async function loadModels() {
   try {
     models.value = await userChannelsAPI.getPricedModels()
-    if (!models.value.some((model) => model.name.toLowerCase() === currentModel.value.trim().toLowerCase())) {
-      currentModel.value = models.value[0]?.name || ''
-    }
+    const fallbackModel = models.value[0]?.name || ''
+    if (!findPricedModel(models.value, preferences.value.defaultModel)) preferences.value.defaultModel = fallbackModel
+    if (!findPricedModel(models.value, currentModel.value)) currentModel.value = fallbackModel
+    saveChatPreferences(preferences.value)
   } catch (error: any) {
     models.value = []
     appStore.showError(error?.message || '读取已定价模型失败')
