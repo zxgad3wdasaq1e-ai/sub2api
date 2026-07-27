@@ -4,7 +4,6 @@ export type ImageJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'ca
 export interface StudioImage {
   id: string
   prompt: string
-  revisedPrompt?: string
   model: string
   mode: ImageMode
   size: string

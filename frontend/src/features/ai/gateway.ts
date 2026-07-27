@@ -39,7 +39,6 @@ export interface GenerateImageOptions {
 export interface GatewayImageResult {
   blob?: Blob
   url?: string
-  revisedPrompt?: string
 }
 
 function extractItems(payload: unknown): unknown[] {
@@ -211,15 +210,14 @@ function parseImageResults(payload: unknown, outputFormat: string): GatewayImage
   return extractItems(payload).flatMap((item): GatewayImageResult[] => {
     if (!item || typeof item !== 'object') return []
     const record = item as Record<string, unknown>
-    const revisedPrompt = typeof record.revised_prompt === 'string' ? record.revised_prompt : undefined
     if (typeof record.b64_json === 'string' && record.b64_json) {
-      return [{ blob: base64ToBlob(record.b64_json, imageMimeType(outputFormat)), revisedPrompt }]
+      return [{ blob: base64ToBlob(record.b64_json, imageMimeType(outputFormat)) }]
     }
     if (typeof record.result === 'string' && record.result) {
       const format = typeof record.output_format === 'string' ? record.output_format : outputFormat
-      return [{ blob: base64ToBlob(record.result, imageMimeType(format)), revisedPrompt }]
+      return [{ blob: base64ToBlob(record.result, imageMimeType(format)) }]
     }
-    if (typeof record.url === 'string' && record.url) return [{ url: record.url, revisedPrompt }]
+    if (typeof record.url === 'string' && record.url) return [{ url: record.url }]
     return []
   })
 }

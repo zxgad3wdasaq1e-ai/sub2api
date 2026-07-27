@@ -107,16 +107,16 @@
             <fieldset>
               <legend class="input-label">生成数量</legend>
               <div class="grid grid-cols-4 overflow-hidden rounded-md border border-gray-300 dark:border-dark-600">
-                <label v-for="count in 4" :key="count" class="cursor-pointer border-r border-gray-300 last:border-r-0 dark:border-dark-600">
-                  <input v-model.number="form.count" class="peer sr-only" type="radio" :value="count" />
-                  <span class="grid h-10 place-items-center text-sm text-gray-500 peer-checked:bg-gray-900 peer-checked:text-white dark:text-gray-400 dark:peer-checked:bg-white dark:peer-checked:text-gray-950">{{ count }}</span>
+                <label v-for="count in MAX_BATCH_SIZE" :key="count" class="border-r border-gray-300 last:border-r-0 dark:border-dark-600" :class="count <= remainingQueueCapacity ? 'cursor-pointer' : 'cursor-not-allowed'">
+                  <input v-model.number="form.count" class="peer sr-only" type="radio" :value="count" :disabled="count > remainingQueueCapacity" />
+                  <span class="grid h-10 place-items-center text-sm text-gray-500 peer-checked:bg-gray-900 peer-checked:text-white peer-disabled:opacity-40 dark:text-gray-400 dark:peer-checked:bg-white dark:peer-checked:text-gray-950">{{ count }}</span>
                 </label>
               </div>
             </fieldset>
 
             <button type="submit" class="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-rose-600 px-4 text-sm font-bold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!canSubmit">
               <Icon name="sparkles" size="md" />
-              加入生成队列
+              {{ remainingQueueCapacity > 0 ? '加入生成队列' : '队列已满' }}
             </button>
           </form>
         </section>
@@ -126,10 +126,10 @@
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex items-center gap-3">
                 <h2 class="text-base font-bold text-gray-950 dark:text-white">任务队列</h2>
-                <span class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">{{ pendingCount }}</span>
+                <span class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">{{ pendingCount }} / {{ MAX_QUEUE_SIZE }}</span>
               </div>
               <div class="grid w-full grid-cols-4 gap-2 sm:w-auto sm:min-w-72">
-                <div v-for="slot in 4" :key="slot" class="flex h-10 items-center justify-center gap-2 rounded-md border text-xs" :class="slot <= activeCount ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-gray-200 text-gray-400 dark:border-dark-700'">
+                <div v-for="slot in MAX_CONCURRENCY" :key="slot" class="flex h-10 items-center justify-center gap-2 rounded-md border text-xs" :class="slot <= activeCount ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300' : 'border-gray-200 text-gray-400 dark:border-dark-700'">
                   <i class="h-2 w-2 rounded-full" :class="slot <= activeCount ? 'animate-pulse bg-emerald-500' : 'bg-gray-300 dark:bg-dark-600'"></i>
                   {{ slot <= activeCount ? '生成中' : '空闲' }}
                 </div>
@@ -210,7 +210,7 @@
           <img :src="imageUrl(selectedImage)" :alt="selectedImage.prompt" class="max-h-[65vh] max-w-full object-contain" />
         </div>
         <div class="flex min-w-0 flex-col">
-          <p class="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700 dark:text-gray-200">{{ selectedImage.revisedPrompt || selectedImage.prompt }}</p>
+          <p class="whitespace-pre-wrap break-words text-sm leading-6 text-gray-700 dark:text-gray-200">{{ selectedImage.prompt }}</p>
           <dl class="mt-5 space-y-2 border-t border-gray-200 pt-4 text-sm dark:border-dark-700">
             <div class="flex justify-between gap-4"><dt class="text-gray-400">模式</dt><dd>{{ selectedImage.mode === 'edit' ? '图生图' : '文生图' }}</dd></div>
             <div class="flex justify-between gap-4"><dt class="text-gray-400">比例</dt><dd>{{ selectedImage.aspectRatio === 'auto' ? '智能' : (selectedImage.aspectRatio || selectedImage.size) }}</dd></div>
@@ -239,6 +239,7 @@ import type { ApiKey } from '@/types'
 import { generateImage, type GenerateImageOptions } from '@/features/ai/gateway'
 import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
 import { imageSizeForAspectRatio, isLikelyImageModel, promptWithAspectRatio, referenceImageLimitForModel, type ImageAspectRatio } from './capabilities'
+import { createReactiveImageJob, MAX_BATCH_SIZE, MAX_CONCURRENCY, MAX_QUEUE_SIZE, remainingImageQueueCapacity } from './queue'
 import { cleanupExpiredStudioImages, cleanupExpiredStudioJobs, deleteStudioImage, loadStudioImages, loadStudioJobs, saveStudioImage, saveStudioJob, STUDIO_RETENTION_MS } from './storage'
 import type { ImageJob, ImageJobStatus, ImageMode, StudioImage } from './types'
 
@@ -253,7 +254,6 @@ interface QueuePayload {
   options: Omit<GenerateImageOptions, 'signal'>
 }
 
-const MAX_CONCURRENCY = 4
 const aspectRatioOptions = [
   { label: '智能', value: 'auto' as ImageAspectRatio, iconWidth: 17, iconHeight: 17 },
   { label: '21:9', value: '21:9' as ImageAspectRatio, iconWidth: 22, iconHeight: 8 },
@@ -305,9 +305,11 @@ const referenceLimit = computed(() => referenceImageLimitForModel(form.model))
 const activeCount = computed(() => jobs.value.filter((job) => job.status === 'running').length)
 const queuedCount = computed(() => jobs.value.filter((job) => job.status === 'queued').length)
 const pendingCount = computed(() => activeCount.value + queuedCount.value)
-const visibleJobs = computed(() => jobs.value.slice(0, 12))
+const remainingQueueCapacity = computed(() => remainingImageQueueCapacity(pendingCount.value))
+const visibleJobs = computed(() => jobs.value.slice(0, MAX_QUEUE_SIZE))
 const canSubmit = computed(() => Boolean(
   selectedApiKey.value && form.model.trim() && form.prompt.trim() &&
+  form.count <= remainingQueueCapacity.value &&
   (form.mode === 'text' || (references.value.length > 0 && referenceLimit.value > 0)),
 ))
 
@@ -318,6 +320,10 @@ watch([() => form.model, apiKeys, models], () => {
 }, { deep: true })
 watch(() => form.mode, (mode) => {
   if (mode === 'text') clearReferences()
+})
+watch(remainingQueueCapacity, (capacity) => {
+  const maximumBatchSize = Math.min(MAX_BATCH_SIZE, capacity)
+  if (maximumBatchSize > 0 && form.count > maximumBatchSize) form.count = maximumBatchSize
 })
 
 async function loadKeys() {
@@ -393,6 +399,8 @@ function applyAspectRatio(ratio: ImageAspectRatio) {
 
 async function submitJobs() {
   if (!canSubmit.value || !selectedApiKey.value) return
+  const jobCount = Math.min(form.count, MAX_BATCH_SIZE, remainingQueueCapacity.value)
+  if (jobCount === 0) return
   const apiKey = selectedApiKey.value
   const aspectRatio = form.aspectRatio
   const size = imageSizeForAspectRatio(form.aspectRatio)
@@ -407,8 +415,8 @@ async function submitJobs() {
     references: form.mode === 'edit' ? references.value.map((reference) => reference.file) : undefined,
   }
   const newJobs: ImageJob[] = []
-  for (let index = 0; index < form.count; index += 1) {
-    const job: ImageJob = {
+  for (let index = 0; index < jobCount; index += 1) {
+    const job = createReactiveImageJob({
       id: crypto.randomUUID(),
       prompt: options.prompt,
       model: options.model,
@@ -421,7 +429,7 @@ async function submitJobs() {
       references: options.references,
       status: 'queued',
       createdAt: Date.now() + index,
-    }
+    })
     jobs.value.unshift(job)
     queuePayloads.set(job.id, { job, options })
     newJobs.push(job)
@@ -429,7 +437,7 @@ async function submitJobs() {
   // Register every job in memory before awaiting IndexedDB writes. This keeps
   // rapid consecutive submissions from interleaving half-created batches.
   await Promise.all(newJobs.map((job) => saveStudioJob(job)))
-  appStore.showSuccess(`${form.count} 个生图任务已加入队列`)
+  appStore.showSuccess(`${jobCount} 个生图任务已加入队列`)
   pumpQueue()
 }
 
@@ -462,7 +470,6 @@ async function runJob(payload: QueuePayload) {
       const image: StudioImage = {
         id: crypto.randomUUID(),
         prompt: options.prompt,
-        revisedPrompt: result.revisedPrompt,
         model: options.model,
         mode: options.mode,
         size: options.size,
