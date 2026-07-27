@@ -271,6 +271,12 @@ async function mountRecharge(checkout: Partial<CheckoutInfoResponse> = {}) {
 }
 
 describe('PaymentView recharge estimate', () => {
+  it('offers the one-yuan shortcut and removes the five-thousand-yuan shortcut', async () => {
+    const wrapper = await mountRecharge()
+
+    expect(wrapper.findComponent(AmountInput).props('amounts')).toEqual([1, 10, 20, 50, 100, 200, 500, 1000, 2000])
+  })
+
   it('shows the payment amount, credited balance, and multiplier in a white summary', async () => {
     const wrapper = await mountRecharge({
       balance_recharge_multiplier: 3.33,
@@ -294,6 +300,27 @@ describe('PaymentView recharge estimate', () => {
     expect(summary.text()).toContain(formatPaymentAmount(1, 'CNY'))
     expect(summary.text()).toContain(formatPaymentAmount(3.33, 'USD'))
     expect(summary.text()).toContain('×3.33')
+    expect(summary.get('[data-test="recharge-rate-preview"]').classes()).toEqual(expect.arrayContaining(['text-base', 'font-bold']))
+  })
+
+  it('multiplies the recharge multiplier by the configured USD to CNY rate', async () => {
+    const wrapper = await mountRecharge({
+      balance_recharge_multiplier: 3,
+      subscription_usd_to_cny_rate: 7,
+      methods: {
+        wxpay: {
+          ...checkoutInfoFixture().data.methods.wxpay,
+          currency: 'CNY',
+        },
+      },
+    })
+
+    wrapper.findComponent(AmountInput).vm.$emit('update:modelValue', 1)
+    await wrapper.vm.$nextTick()
+
+    const summary = wrapper.get('[data-test="recharge-summary"]')
+    expect(summary.text()).toContain(formatPaymentAmount(21, 'USD'))
+    expect(summary.text()).toContain('×21.00')
   })
 })
 

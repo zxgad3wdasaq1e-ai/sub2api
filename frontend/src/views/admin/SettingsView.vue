@@ -6855,8 +6855,8 @@
                       {{
                         t("admin.settings.payment.balanceRechargePreview", {
                           usd: (
-                            Number(form.payment_balance_recharge_multiplier) ||
-                            1
+                            (Number(form.payment_balance_recharge_multiplier) || 1) *
+                            (Number(form.payment_subscription_usd_to_cny_rate) || 1)
                           ).toFixed(2),
                         })
                       }}

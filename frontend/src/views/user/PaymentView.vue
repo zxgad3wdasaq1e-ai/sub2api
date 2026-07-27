@@ -48,7 +48,7 @@
             <div class="card p-6">
               <AmountInput
                 v-model="amount"
-                :amounts="[10, 20, 50, 100, 200, 500, 1000, 2000, 5000]"
+                :amounts="[1, 10, 20, 50, 100, 200, 500, 1000, 2000]"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
               />
@@ -69,7 +69,7 @@
                 </div>
                 <div class="rounded-lg bg-gray-100 px-3 py-2 text-right">
                   <p class="text-xs text-gray-500">{{ t('payment.rechargeMultiplier') }}</p>
-                  <p class="mt-0.5 text-lg font-bold text-emerald-700">×{{ balanceRechargeMultiplier.toFixed(2) }}</p>
+                  <p class="mt-0.5 text-lg font-bold text-emerald-700">×{{ effectiveBalanceRechargeMultiplier.toFixed(2) }}</p>
                 </div>
               </div>
               <div class="mt-4 space-y-2 border-t border-gray-200 pt-3 text-sm">
@@ -90,8 +90,8 @@
                   <span class="font-medium text-gray-900">{{ formatCreditedAmount(creditedAmount) }}</span>
                 </div>
               </div>
-              <p class="mt-3 border-t border-gray-200 pt-3 text-xs text-gray-500">
-                {{ t('payment.rechargeRatePreview', { usd: balanceRechargeMultiplier.toFixed(2) }) }}
+              <p data-test="recharge-rate-preview" class="mt-3 border-t border-gray-200 pt-3 text-base font-bold text-gray-900">
+                {{ t('payment.rechargeRatePreview', { usd: effectiveBalanceRechargeMultiplier.toFixed(2) }) }}
               </p>
             </div>
             <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
@@ -534,7 +534,10 @@ const subscriptionUsdToCnyRate = computed(() => {
   const rate = checkout.value.subscription_usd_to_cny_rate
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
-const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
+const effectiveBalanceRechargeMultiplier = computed(() => (
+  balanceRechargeMultiplier.value * (subscriptionUsdToCnyRate.value || 1)
+))
+const creditedAmount = computed(() => Math.round((validAmount.value * effectiveBalanceRechargeMultiplier.value) * 100) / 100)
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {

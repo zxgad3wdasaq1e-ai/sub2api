@@ -291,6 +291,17 @@ func TestCalculateCreditedBalanceStillUsesRechargeMultiplier(t *testing.T) {
 	}
 }
 
+func TestCalculateCreditedBalanceMultipliesConfiguredExchangeRate(t *testing.T) {
+	t.Parallel()
+
+	if got := calculateCreditedBalanceWithExchangeRate(1, 3, 7); got != 21 {
+		t.Fatalf("credited balance = %v, want 21", got)
+	}
+	if got := calculateCreditedBalanceWithExchangeRate(1, 3, 0); got != 3 {
+		t.Fatalf("credited balance without exchange rate = %v, want 3", got)
+	}
+}
+
 func TestCalculateCreateOrderPayAmountRejectsFractionalZeroDecimal(t *testing.T) {
 	t.Parallel()
 
