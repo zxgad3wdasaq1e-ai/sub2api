@@ -263,7 +263,7 @@ func (e *EasyPay) fetchHostedQRCode(ctx context.Context, payURL string) string {
 	if err != nil {
 		return ""
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return ""
 	}
