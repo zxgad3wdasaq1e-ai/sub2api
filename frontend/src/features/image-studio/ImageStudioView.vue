@@ -11,7 +11,7 @@
         <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
           <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-emerald-500"></i>运行 {{ activeCount }}</span>
           <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-amber-400"></i>等待 {{ queuedCount }}</span>
-          <span>图库保留 15 天</span>
+          <span>图库保留 7 天，请尽快下载</span>
         </div>
       </header>
 
@@ -74,7 +74,7 @@
               <div class="overflow-x-auto rounded-md border border-gray-300 bg-white dark:border-dark-600 dark:bg-dark-900">
                 <div class="grid min-w-[342px] grid-cols-9">
                 <label v-for="option in aspectRatioOptions" :key="option.value" class="cursor-pointer border-r border-gray-200 last:border-r-0 dark:border-dark-700">
-                  <input v-model="form.aspectRatio" class="peer sr-only" type="radio" :value="option.value" />
+                  <input v-model="form.aspectRatio" class="peer sr-only" type="radio" :value="option.value" @change="applyAspectRatio(option.value)" />
                   <span class="flex h-16 flex-col items-center justify-center gap-1.5 text-xs text-gray-500 peer-checked:bg-gray-100 peer-checked:text-gray-950 dark:text-gray-400 dark:peer-checked:bg-dark-700 dark:peer-checked:text-white">
                     <i class="block rounded-[3px] border-2 border-current" :style="{ width: `${option.iconWidth}px`, height: `${option.iconHeight}px` }"></i>
                     <b class="font-medium">{{ option.label }}</b>
@@ -196,7 +196,7 @@
               <div>
                 <i class="mb-4 block h-1 w-12 bg-rose-600"></i>
                 <h3 class="text-xl font-bold text-gray-950 dark:text-white">开始第一张创作</h3>
-                <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">在左侧填写画面描述，任务会进入 4 路并发队列，结果自动保留 15 天。</p>
+                <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">在左侧填写画面描述，任务会进入 4 路并发队列，结果保留 7 天，请尽快下载。</p>
               </div>
             </div>
           </div>
@@ -238,8 +238,8 @@ import { useAppStore } from '@/stores/app'
 import type { ApiKey } from '@/types'
 import { generateImage, type GenerateImageOptions } from '@/features/ai/gateway'
 import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
-import { imageSizeForAspectRatio, isLikelyImageModel, referenceImageLimitForModel, type ImageAspectRatio } from './capabilities'
-import { cleanupExpiredStudioImages, cleanupExpiredStudioJobs, deleteStudioImage, loadStudioImages, loadStudioJobs, saveStudioImage, saveStudioJob } from './storage'
+import { imageSizeForAspectRatio, isLikelyImageModel, promptWithAspectRatio, referenceImageLimitForModel, type ImageAspectRatio } from './capabilities'
+import { cleanupExpiredStudioImages, cleanupExpiredStudioJobs, deleteStudioImage, loadStudioImages, loadStudioJobs, saveStudioImage, saveStudioJob, STUDIO_RETENTION_MS } from './storage'
 import type { ImageJob, ImageJobStatus, ImageMode, StudioImage } from './types'
 
 interface ReferenceDraft {
@@ -253,7 +253,6 @@ interface QueuePayload {
   options: Omit<GenerateImageOptions, 'signal'>
 }
 
-const RETENTION_MS = 15 * 24 * 60 * 60 * 1000
 const MAX_CONCURRENCY = 4
 const aspectRatioOptions = [
   { label: '智能', value: 'auto' as ImageAspectRatio, iconWidth: 17, iconHeight: 17 },
@@ -388,11 +387,17 @@ function trimReferencesToLimit() {
   appStore.showInfo(`已按模型上限保留 ${referenceLimit.value} 张参考图`)
 }
 
+function applyAspectRatio(ratio: ImageAspectRatio) {
+  form.prompt = promptWithAspectRatio(form.prompt, ratio)
+}
+
 async function submitJobs() {
   if (!canSubmit.value || !selectedApiKey.value) return
+  const apiKey = selectedApiKey.value
+  const aspectRatio = form.aspectRatio
   const size = imageSizeForAspectRatio(form.aspectRatio)
   const options: Omit<GenerateImageOptions, 'signal'> = {
-    apiKey: selectedApiKey.value.key,
+    apiKey: apiKey.key,
     model: form.model.trim(),
     prompt: form.prompt.trim(),
     mode: form.mode,
@@ -401,6 +406,7 @@ async function submitJobs() {
     outputFormat: form.outputFormat,
     references: form.mode === 'edit' ? references.value.map((reference) => reference.file) : undefined,
   }
+  const newJobs: ImageJob[] = []
   for (let index = 0; index < form.count; index += 1) {
     const job: ImageJob = {
       id: crypto.randomUUID(),
@@ -408,8 +414,8 @@ async function submitJobs() {
       model: options.model,
       mode: options.mode,
       size: options.size,
-      aspectRatio: form.aspectRatio,
-      apiKeyId: selectedApiKey.value.id,
+      aspectRatio,
+      apiKeyId: apiKey.id,
       quality: options.quality,
       outputFormat: options.outputFormat,
       references: options.references,
@@ -418,8 +424,11 @@ async function submitJobs() {
     }
     jobs.value.unshift(job)
     queuePayloads.set(job.id, { job, options })
-    await saveStudioJob(job)
+    newJobs.push(job)
   }
+  // Register every job in memory before awaiting IndexedDB writes. This keeps
+  // rapid consecutive submissions from interleaving half-created batches.
+  await Promise.all(newJobs.map((job) => saveStudioJob(job)))
   appStore.showSuccess(`${form.count} 个生图任务已加入队列`)
   pumpQueue()
 }
@@ -461,7 +470,7 @@ async function runJob(payload: QueuePayload) {
         quality: options.quality,
         outputFormat: options.outputFormat,
         createdAt: Date.now(),
-        expiresAt: Date.now() + RETENTION_MS,
+        expiresAt: Date.now() + STUDIO_RETENTION_MS,
         blob,
         remoteUrl: result.url,
       }
@@ -520,14 +529,16 @@ function imageUrl(image: StudioImage): string {
 async function reloadJobs() {
   await cleanupExpiredStudioJobs()
   const storedJobs = await loadStudioJobs()
-  jobs.value = storedJobs.map((job) => {
-    if (job.status !== 'running') return job
-    return { ...job, status: 'failed' as const, error: '页面刷新前任务状态无法确认，请重新生成' }
-  })
+  const resumedCount = storedJobs.filter((job) => job.status === 'running').length
+  jobs.value = storedJobs.map((job) => job.status === 'running'
+    ? { ...job, status: 'queued' as const, error: undefined }
+    : job)
+  if (resumedCount) {
+    appStore.showInfo(`${resumedCount} 个未完成任务已恢复，将继续生成`)
+  }
   queuePayloads.clear()
   for (const job of jobs.value) {
     if (job.status !== 'queued') {
-      if (job.status === 'failed' && storedJobs.find((item) => item.id === job.id)?.status === 'running') void saveStudioJob(job)
       continue
     }
     const key = apiKeys.value.find((item) => item.id === job.apiKeyId && isImageKey(item))

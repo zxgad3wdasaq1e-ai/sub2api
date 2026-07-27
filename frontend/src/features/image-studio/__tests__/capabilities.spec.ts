@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { imageSizeForAspectRatio, isLikelyImageModel, referenceImageLimitForModel } from '../capabilities'
+import { imageSizeForAspectRatio, isLikelyImageModel, promptWithAspectRatio, referenceImageLimitForModel } from '../capabilities'
 
 describe('image studio model capabilities', () => {
   it('uses the reference limits from the standalone image studio', () => {
@@ -22,5 +22,11 @@ describe('image studio model capabilities', () => {
     expect(imageSizeForAspectRatio('21:9')).toBe('1536x1024')
     expect(imageSizeForAspectRatio('1:1')).toBe('1024x1024')
     expect(imageSizeForAspectRatio('9:16')).toBe('1024x1536')
+  })
+
+  it('writes the selected canvas ratio into the prompt without stacking prefixes', () => {
+    expect(promptWithAspectRatio('生成一个男孩', '21:9')).toBe('画幅比例 21:9 生成一个男孩')
+    expect(promptWithAspectRatio('画幅比例 21:9 生成一个男孩', '1:1')).toBe('画幅比例 1:1 生成一个男孩')
+    expect(promptWithAspectRatio('画幅比例 21:9 生成一个男孩', 'auto')).toBe('生成一个男孩')
   })
 })

@@ -4,6 +4,8 @@ const DB_NAME = 'sub2api-image-studio'
 const DB_VERSION = 2
 const IMAGE_STORE_NAME = 'images'
 const JOB_STORE_NAME = 'jobs'
+export const STUDIO_RETENTION_DAYS = 7
+export const STUDIO_RETENTION_MS = STUDIO_RETENTION_DAYS * 24 * 60 * 60 * 1000
 
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
@@ -91,7 +93,7 @@ export async function deleteStudioJob(id: string): Promise<void> {
 
 export async function cleanupExpiredStudioJobs(now = Date.now()): Promise<number> {
   const jobs = await loadStudioJobs()
-  const expired = jobs.filter((job) => job.createdAt + 15 * 24 * 60 * 60 * 1000 <= now)
+  const expired = jobs.filter((job) => job.createdAt + STUDIO_RETENTION_MS <= now)
   await Promise.all(expired.map((job) => deleteStudioJob(job.id)))
   return expired.length
 }

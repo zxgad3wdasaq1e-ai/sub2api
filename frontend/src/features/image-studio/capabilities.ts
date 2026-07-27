@@ -19,6 +19,14 @@ export function isLikelyImageModel(model: string): boolean {
 export const IMAGE_ASPECT_RATIOS = ['auto', '21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'] as const
 export type ImageAspectRatio = typeof IMAGE_ASPECT_RATIOS[number]
 
+/** Keeps the selected ratio in the actual prompt so providers that only honor
+ * the prompt still receive the user's canvas intent. */
+export function promptWithAspectRatio(prompt: string, ratio: ImageAspectRatio): string {
+  const withoutRatio = prompt.trim().replace(/^画幅比例\s+(?:智能|auto|\d+:\d+)\s*/i, '').trimStart()
+  if (ratio === 'auto') return withoutRatio
+  return `画幅比例 ${ratio}${withoutRatio ? ` ${withoutRatio}` : ''}`
+}
+
 /** Maps the richer studio ratio picker to sizes accepted by OpenAI-compatible image APIs. */
 export function imageSizeForAspectRatio(ratio: ImageAspectRatio): string {
   if (ratio === 'auto') return 'auto'
