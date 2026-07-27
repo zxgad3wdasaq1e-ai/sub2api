@@ -237,7 +237,9 @@ export async function generateImage(options: GenerateImageOptions): Promise<Gate
     form.append('quality', options.quality)
     form.append('response_format', 'b64_json')
     form.append('output_format', options.outputFormat)
-    for (const file of options.references || []) form.append('image[]', file, file.name)
+    for (const [index, file] of (options.references || []).entries()) {
+      form.append(index === 0 ? 'image' : 'image[]', file, file.name)
+    }
     body = form
   } else {
     headers['Content-Type'] = 'application/json'

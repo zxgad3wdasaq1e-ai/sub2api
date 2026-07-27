@@ -6,6 +6,7 @@ import type { ImageJob } from '../types'
 function queuedJob(): ImageJob {
   return {
     id: 'job-1',
+    ownerUserId: 1,
     prompt: '生成一个男孩',
     model: 'gpt-image-2',
     mode: 'text',

@@ -42,4 +42,32 @@ describe('AI gateway response parsing', () => {
     expect(results).toHaveLength(1)
     expect(results[0]).not.toHaveProperty('revisedPrompt')
   })
+
+  it('sends image edits as multipart image inputs without a JSON content type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aGVsbG8=' }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const first = new File(['first'], 'first.png', { type: 'image/png' })
+    const second = new File(['second'], 'second.png', { type: 'image/png' })
+
+    await generateImage({
+      apiKey: 'test-key',
+      model: 'gpt-image-2',
+      prompt: 'replace the background',
+      mode: 'edit',
+      size: '1024x1024',
+      quality: 'auto',
+      outputFormat: 'png',
+      references: [first, second],
+    })
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(request.headers).toEqual({ Authorization: 'Bearer test-key' })
+    const form = request.body as FormData
+    expect(form.get('model')).toBe('gpt-image-2')
+    expect(form.get('prompt')).toBe('replace the background')
+    expect(form.get('image')).toMatchObject({ name: 'first.png', size: 5, type: 'image/png' })
+    expect(form.get('image[]')).toMatchObject({ name: 'second.png', size: 6, type: 'image/png' })
+  })
 })

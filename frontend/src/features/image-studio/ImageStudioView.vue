@@ -235,6 +235,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { keysAPI } from '@/api/keys'
 import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import type { ApiKey } from '@/types'
 import { generateImage, type GenerateImageOptions } from '@/features/ai/gateway'
 import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
@@ -267,6 +268,7 @@ const aspectRatioOptions = [
 ]
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const form = reactive({
   apiKeyId: 0,
   model: 'gpt-image-2',
@@ -287,6 +289,10 @@ const loadingKeys = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const queuePayloads = new Map<string, QueuePayload>()
 const objectUrls = new Map<string, string>()
+const ownerUserId = computed(() => {
+  const id = authStore.user?.id
+  return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null
+})
 
 const isImageKey = (key: ApiKey) => {
   if (key.group?.allow_image_generation === false) return false
@@ -308,7 +314,7 @@ const pendingCount = computed(() => activeCount.value + queuedCount.value)
 const remainingQueueCapacity = computed(() => remainingImageQueueCapacity(pendingCount.value))
 const visibleJobs = computed(() => jobs.value.slice(0, MAX_QUEUE_SIZE))
 const canSubmit = computed(() => Boolean(
-  selectedApiKey.value && form.model.trim() && form.prompt.trim() &&
+  ownerUserId.value && selectedApiKey.value && form.model.trim() && form.prompt.trim() &&
   form.count <= remainingQueueCapacity.value &&
   (form.mode === 'text' || (references.value.length > 0 && referenceLimit.value > 0)),
 ))
@@ -398,7 +404,8 @@ function applyAspectRatio(ratio: ImageAspectRatio) {
 }
 
 async function submitJobs() {
-  if (!canSubmit.value || !selectedApiKey.value) return
+  const owner = ownerUserId.value
+  if (!owner || !canSubmit.value || !selectedApiKey.value) return
   const jobCount = Math.min(form.count, MAX_BATCH_SIZE, remainingQueueCapacity.value)
   if (jobCount === 0) return
   const apiKey = selectedApiKey.value
@@ -418,6 +425,7 @@ async function submitJobs() {
   for (let index = 0; index < jobCount; index += 1) {
     const job = createReactiveImageJob({
       id: crypto.randomUUID(),
+      ownerUserId: owner,
       prompt: options.prompt,
       model: options.model,
       mode: options.mode,
@@ -436,14 +444,18 @@ async function submitJobs() {
   }
   // Register every job in memory before awaiting IndexedDB writes. This keeps
   // rapid consecutive submissions from interleaving half-created batches.
-  await Promise.all(newJobs.map((job) => saveStudioJob(job)))
+  await Promise.all(newJobs.map((job) => saveStudioJob(owner, job)))
   appStore.showSuccess(`${jobCount} 个生图任务已加入队列`)
   pumpQueue()
 }
 
 function pumpQueue() {
+  const owner = ownerUserId.value
+  if (!owner) return
   while (activeCount.value < MAX_CONCURRENCY) {
-    const payload = [...queuePayloads.values()].find((item) => item.job.status === 'queued')
+    const payload = [...queuePayloads.values()].find((item) => (
+      item.job.ownerUserId === owner && item.job.status === 'queued'
+    ))
     if (!payload) break
     void runJob(payload)
   }
@@ -451,10 +463,14 @@ function pumpQueue() {
 
 async function runJob(payload: QueuePayload) {
   const { job, options } = payload
+  if (ownerUserId.value !== job.ownerUserId) {
+    queuePayloads.delete(job.id)
+    return
+  }
   const controller = new AbortController()
   job.abortController = controller
   job.status = 'running'
-  await saveStudioJob(job)
+  await saveStudioJob(job.ownerUserId, job)
   try {
     const results = await generateImage({ ...options, signal: controller.signal })
     for (const result of results) {
@@ -469,6 +485,7 @@ async function runJob(payload: QueuePayload) {
       }
       const image: StudioImage = {
         id: crypto.randomUUID(),
+        ownerUserId: job.ownerUserId,
         prompt: options.prompt,
         model: options.model,
         mode: options.mode,
@@ -481,11 +498,11 @@ async function runJob(payload: QueuePayload) {
         blob,
         remoteUrl: result.url,
       }
-      images.value.unshift(image)
-      await saveStudioImage(image)
+      await saveStudioImage(job.ownerUserId, image)
+      if (ownerUserId.value === job.ownerUserId) images.value.unshift(image)
     }
     job.status = 'completed'
-    await saveStudioJob(job)
+    await saveStudioJob(job.ownerUserId, job)
   } catch (error: any) {
     if (error?.name === 'AbortError') job.status = 'canceled'
     else {
@@ -493,11 +510,11 @@ async function runJob(payload: QueuePayload) {
       job.error = error?.message || '图片生成失败'
       appStore.showError(job.error || '图片生成失败')
     }
-    await saveStudioJob(job)
+    await saveStudioJob(job.ownerUserId, job)
   } finally {
     job.abortController = undefined
     queuePayloads.delete(job.id)
-    pumpQueue()
+    if (ownerUserId.value === job.ownerUserId) pumpQueue()
   }
 }
 
@@ -505,7 +522,7 @@ function cancelJob(job: ImageJob) {
   if (job.status === 'queued') {
     job.status = 'canceled'
     queuePayloads.delete(job.id)
-    void saveStudioJob(job)
+    void saveStudioJob(job.ownerUserId, job)
   } else if (job.status === 'running') {
     job.abortController?.abort()
   }
@@ -534,8 +551,15 @@ function imageUrl(image: StudioImage): string {
 }
 
 async function reloadJobs() {
-  await cleanupExpiredStudioJobs()
-  const storedJobs = await loadStudioJobs()
+  const owner = ownerUserId.value
+  if (!owner) {
+    jobs.value = []
+    queuePayloads.clear()
+    return
+  }
+  await cleanupExpiredStudioJobs(owner)
+  const storedJobs = await loadStudioJobs(owner)
+  if (ownerUserId.value !== owner) return
   const resumedCount = storedJobs.filter((job) => job.status === 'running').length
   jobs.value = storedJobs.map((job) => job.status === 'running'
     ? { ...job, status: 'queued' as const, error: undefined }
@@ -552,7 +576,7 @@ async function reloadJobs() {
     if (!key) {
       job.status = 'failed'
       job.error = '原 API 密钥已不可用，请重新选择模型和密钥'
-      void saveStudioJob(job)
+      void saveStudioJob(owner, job)
       continue
     }
     queuePayloads.set(job.id, {
@@ -573,13 +597,22 @@ async function reloadJobs() {
 }
 
 async function reloadImages() {
-  await cleanupExpiredStudioImages()
-  images.value = await loadStudioImages()
+  const owner = ownerUserId.value
+  if (!owner) {
+    images.value = []
+    return
+  }
+  await cleanupExpiredStudioImages(owner)
+  const storedImages = await loadStudioImages(owner)
+  if (ownerUserId.value === owner) images.value = storedImages
 }
 
 async function removeImage(image: StudioImage) {
+  const owner = ownerUserId.value
+  if (!owner || image.ownerUserId !== owner) return
   if (!window.confirm('确定从本地图库删除这张图片吗？')) return
-  await deleteStudioImage(image.id)
+  const deleted = await deleteStudioImage(owner, image.id)
+  if (!deleted || ownerUserId.value !== owner) return
   images.value = images.value.filter((item) => item.id !== image.id)
   const url = objectUrls.get(image.id)
   if (url) URL.revokeObjectURL(url)
@@ -610,6 +643,21 @@ function formatDate(value: number): string {
 
 onMounted(async () => {
   await loadKeys()
+  await Promise.all([reloadImages(), reloadJobs()])
+})
+
+watch(ownerUserId, async (nextOwner, previousOwner) => {
+  if (nextOwner === previousOwner) return
+  jobs.value.forEach((job) => job.abortController?.abort())
+  queuePayloads.clear()
+  jobs.value = []
+  images.value = []
+  selectedImage.value = null
+  objectUrls.forEach((url) => URL.revokeObjectURL(url))
+  objectUrls.clear()
+  if (!nextOwner) return
+  await loadKeys()
+  if (ownerUserId.value !== nextOwner) return
   await Promise.all([reloadImages(), reloadJobs()])
 })
 

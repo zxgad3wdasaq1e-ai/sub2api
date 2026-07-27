@@ -3,6 +3,7 @@ export type ImageJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'ca
 
 export interface StudioImage {
   id: string
+  ownerUserId: number
   prompt: string
   model: string
   mode: ImageMode
@@ -18,6 +19,7 @@ export interface StudioImage {
 
 export interface ImageJob {
   id: string
+  ownerUserId: number
   prompt: string
   model: string
   mode: ImageMode
