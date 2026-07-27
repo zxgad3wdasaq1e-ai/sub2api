@@ -237,10 +237,10 @@ import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiKey } from '@/types'
-import { generateImage, type GenerateImageOptions } from '@/features/ai/gateway'
+import { getImageTask, submitImageTask, type GatewayImageResult, type GenerateImageOptions } from '@/features/ai/gateway'
 import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
 import { imageSizeForAspectRatio, isLikelyImageModel, promptWithAspectRatio, referenceImageLimitForModel, type ImageAspectRatio } from './capabilities'
-import { createReactiveImageJob, MAX_BATCH_SIZE, MAX_CONCURRENCY, MAX_QUEUE_SIZE, remainingImageQueueCapacity } from './queue'
+import { createReactiveImageJob, MAX_BATCH_SIZE, MAX_CONCURRENCY, MAX_QUEUE_SIZE, recoverImageJob, remainingImageQueueCapacity, shouldPersistImageJobFailure } from './queue'
 import { cleanupExpiredStudioImages, cleanupExpiredStudioJobs, deleteStudioImage, loadStudioImages, loadStudioJobs, saveStudioImage, saveStudioJob, STUDIO_RETENTION_MS } from './storage'
 import type { ImageJob, ImageJobStatus, ImageMode, StudioImage } from './types'
 
@@ -288,6 +288,7 @@ const selectedImage = ref<StudioImage | null>(null)
 const loadingKeys = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const queuePayloads = new Map<string, QueuePayload>()
+const activeJobIds = new Set<string>()
 const objectUrls = new Map<string, string>()
 const ownerUserId = computed(() => {
   const id = authStore.user?.id
@@ -452,12 +453,68 @@ async function submitJobs() {
 function pumpQueue() {
   const owner = ownerUserId.value
   if (!owner) return
-  while (activeCount.value < MAX_CONCURRENCY) {
+  while (activeJobIds.size < MAX_CONCURRENCY) {
     const payload = [...queuePayloads.values()].find((item) => (
-      item.job.ownerUserId === owner && item.job.status === 'queued'
+      item.job.ownerUserId === owner &&
+      !activeJobIds.has(item.job.id) &&
+      (item.job.status === 'queued' || (item.job.status === 'running' && Boolean(item.job.remoteTaskId)))
     ))
     if (!payload) break
     void runJob(payload)
+  }
+}
+
+function waitForImageTask(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, 3000)
+    const abort = () => {
+      window.clearTimeout(timeout)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
+async function storeJobResults(job: ImageJob, options: QueuePayload['options'], results: GatewayImageResult[], signal: AbortSignal) {
+  for (const [index, result] of results.entries()) {
+    let blob = result.blob
+    if (!blob && result.url) {
+      try {
+        const response = await fetch(result.url, { signal })
+        if (response.ok) blob = await response.blob()
+      } catch (error: any) {
+        if (error?.name === 'AbortError') throw error
+        // Keep the provider URL when it cannot be cached due to CORS.
+      }
+    }
+    const image: StudioImage = {
+      id: `${job.id}-${index}`,
+      ownerUserId: job.ownerUserId,
+      prompt: options.prompt,
+      model: options.model,
+      mode: options.mode,
+      size: options.size,
+      aspectRatio: job.aspectRatio,
+      quality: options.quality,
+      outputFormat: options.outputFormat,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + STUDIO_RETENTION_MS,
+      blob,
+      remoteUrl: result.url,
+    }
+    await saveStudioImage(job.ownerUserId, image)
+    if (ownerUserId.value === job.ownerUserId) {
+      const existingIndex = images.value.findIndex((item) => item.id === image.id)
+      if (existingIndex >= 0) images.value.splice(existingIndex, 1)
+      images.value.unshift(image)
+    }
   }
 }
 
@@ -467,53 +524,47 @@ async function runJob(payload: QueuePayload) {
     queuePayloads.delete(job.id)
     return
   }
+  if (activeJobIds.has(job.id)) return
+  activeJobIds.add(job.id)
   const controller = new AbortController()
   job.abortController = controller
   job.status = 'running'
   await saveStudioJob(job.ownerUserId, job)
   try {
-    const results = await generateImage({ ...options, signal: controller.signal })
-    for (const result of results) {
-      let blob = result.blob
-      if (!blob && result.url) {
-        try {
-          const response = await fetch(result.url)
-          if (response.ok) blob = await response.blob()
-        } catch {
-          // Keep the provider URL when it cannot be cached due to CORS.
-        }
-      }
-      const image: StudioImage = {
-        id: crypto.randomUUID(),
-        ownerUserId: job.ownerUserId,
-        prompt: options.prompt,
-        model: options.model,
-        mode: options.mode,
-        size: options.size,
-        aspectRatio: job.aspectRatio,
-        quality: options.quality,
-        outputFormat: options.outputFormat,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + STUDIO_RETENTION_MS,
-        blob,
-        remoteUrl: result.url,
-      }
-      await saveStudioImage(job.ownerUserId, image)
-      if (ownerUserId.value === job.ownerUserId) images.value.unshift(image)
+    if (!job.remoteTaskId) {
+      const submitted = await submitImageTask({ ...options, signal: controller.signal })
+      job.remoteTaskId = submitted.taskId
+      await saveStudioJob(job.ownerUserId, job)
     }
-    job.status = 'completed'
-    await saveStudioJob(job.ownerUserId, job)
+
+    const taskId = job.remoteTaskId
+    if (!taskId) throw new Error('服务端未返回生图任务编号')
+    while (!controller.signal.aborted && job.status === 'running') {
+      const task = await getImageTask(options.apiKey, taskId, options.outputFormat, controller.signal)
+      if (task.status === 'processing') {
+        await waitForImageTask(controller.signal)
+        continue
+      }
+      if (task.status === 'failed') throw new Error(task.error || '图片生成失败')
+      await storeJobResults(job, options, task.results || [], controller.signal)
+      if (controller.signal.aborted || job.status !== 'running') return
+      job.status = 'completed'
+      await saveStudioJob(job.ownerUserId, job)
+      break
+    }
   } catch (error: any) {
-    if (error?.name === 'AbortError') job.status = 'canceled'
-    else {
+    // Refresh, navigation and logout only detach this browser's poller. The
+    // server-side task keeps running and is resumed from remoteTaskId next time.
+    if (shouldPersistImageJobFailure(error, job.status)) {
       job.status = 'failed'
       job.error = error?.message || '图片生成失败'
       appStore.showError(job.error || '图片生成失败')
+      await saveStudioJob(job.ownerUserId, job)
     }
-    await saveStudioJob(job.ownerUserId, job)
   } finally {
     job.abortController = undefined
-    queuePayloads.delete(job.id)
+    activeJobIds.delete(job.id)
+    if (job.status !== 'running') queuePayloads.delete(job.id)
     if (ownerUserId.value === job.ownerUserId) pumpQueue()
   }
 }
@@ -524,6 +575,9 @@ function cancelJob(job: ImageJob) {
     queuePayloads.delete(job.id)
     void saveStudioJob(job.ownerUserId, job)
   } else if (job.status === 'running') {
+    job.status = 'canceled'
+    queuePayloads.delete(job.id)
+    void saveStudioJob(job.ownerUserId, job)
     job.abortController?.abort()
   }
 }
@@ -561,15 +615,13 @@ async function reloadJobs() {
   const storedJobs = await loadStudioJobs(owner)
   if (ownerUserId.value !== owner) return
   const resumedCount = storedJobs.filter((job) => job.status === 'running').length
-  jobs.value = storedJobs.map((job) => job.status === 'running'
-    ? { ...job, status: 'queued' as const, error: undefined }
-    : job)
+  jobs.value = storedJobs.map(recoverImageJob)
   if (resumedCount) {
     appStore.showInfo(`${resumedCount} 个未完成任务已恢复，将继续生成`)
   }
   queuePayloads.clear()
   for (const job of jobs.value) {
-    if (job.status !== 'queued') {
+    if (job.status !== 'queued' && !(job.status === 'running' && job.remoteTaskId)) {
       continue
     }
     const key = apiKeys.value.find((item) => item.id === job.apiKeyId && isImageKey(item))
@@ -649,6 +701,7 @@ onMounted(async () => {
 watch(ownerUserId, async (nextOwner, previousOwner) => {
   if (nextOwner === previousOwner) return
   jobs.value.forEach((job) => job.abortController?.abort())
+  activeJobIds.clear()
   queuePayloads.clear()
   jobs.value = []
   images.value = []
@@ -663,6 +716,8 @@ watch(ownerUserId, async (nextOwner, previousOwner) => {
 
 onBeforeUnmount(() => {
   jobs.value.forEach((job) => job.abortController?.abort())
+  activeJobIds.clear()
+  queuePayloads.clear()
   clearReferences()
   objectUrls.forEach((url) => URL.revokeObjectURL(url))
   objectUrls.clear()

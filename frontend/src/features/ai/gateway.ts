@@ -41,6 +41,15 @@ export interface GatewayImageResult {
   url?: string
 }
 
+export type GatewayImageTaskStatus = 'processing' | 'completed' | 'failed'
+
+export interface GatewayImageTask {
+  taskId: string
+  status: GatewayImageTaskStatus
+  results?: GatewayImageResult[]
+  error?: string
+}
+
 function extractItems(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload
   if (!payload || typeof payload !== 'object') return []
@@ -222,10 +231,14 @@ function parseImageResults(payload: unknown, outputFormat: string): GatewayImage
   })
 }
 
-export async function generateImage(options: GenerateImageOptions): Promise<GatewayImageResult[]> {
+function imageRequest(options: GenerateImageOptions, asynchronous: boolean): {
+  endpoint: string
+  headers: Record<string, string>
+  body: BodyInit
+} {
   const headers: Record<string, string> = { Authorization: `Bearer ${options.apiKey}` }
-  let body: BodyInit
   let endpoint = '/v1/images/generations'
+  let body: BodyInit
 
   if (options.mode === 'edit') {
     endpoint = '/v1/images/edits'
@@ -254,10 +267,70 @@ export async function generateImage(options: GenerateImageOptions): Promise<Gate
     })
   }
 
-  const response = await fetch(buildGatewayUrl(endpoint), {
+  if (asynchronous) endpoint += '/async'
+  return { endpoint, headers, body }
+}
+
+function parseImageTask(payload: unknown, outputFormat: string): GatewayImageTask {
+  if (!payload || typeof payload !== 'object') throw new Error('The image task API returned an invalid response')
+  const root = payload as Record<string, unknown>
+  const taskId = typeof root.task_id === 'string'
+    ? root.task_id
+    : typeof root.id === 'string' ? root.id : ''
+  const status = root.status
+  if (!taskId || (status !== 'processing' && status !== 'completed' && status !== 'failed')) {
+    throw new Error('The image task API returned an invalid response')
+  }
+  if (status === 'failed') {
+    return { taskId, status, error: errorMessage(root.error, '图片生成失败') }
+  }
+  if (status === 'completed') {
+    const results = parseImageResults(root.result, outputFormat)
+    if (!results.length) throw new Error('The image API returned no usable image data')
+    return { taskId, status, results }
+  }
+  return { taskId, status }
+}
+
+export async function submitImageTask(options: GenerateImageOptions): Promise<GatewayImageTask> {
+  const request = imageRequest(options, true)
+  const response = await fetch(buildGatewayUrl(request.endpoint), {
     method: 'POST',
-    headers,
-    body,
+    headers: request.headers,
+    body: request.body,
+    signal: options.signal,
+  })
+  if (!response.ok) {
+    const error = await parseGatewayError(response)
+    if (response.status === 404 && error.message.includes('async image tasks are not enabled')) {
+      throw new Error('服务端异步生图未启用，请管理员先配置生图对象存储')
+    }
+    throw error
+  }
+  return parseImageTask(await response.json(), options.outputFormat)
+}
+
+export async function getImageTask(
+  apiKey: string,
+  taskId: string,
+  outputFormat: string,
+  signal?: AbortSignal,
+): Promise<GatewayImageTask> {
+  const response = await fetch(buildGatewayUrl(`/v1/images/tasks/${encodeURIComponent(taskId)}`), {
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    signal,
+  })
+  if (!response.ok) throw await parseGatewayError(response)
+  return parseImageTask(await response.json(), outputFormat)
+}
+
+export async function generateImage(options: GenerateImageOptions): Promise<GatewayImageResult[]> {
+  const request = imageRequest(options, false)
+
+  const response = await fetch(buildGatewayUrl(request.endpoint), {
+    method: 'POST',
+    headers: request.headers,
+    body: request.body,
     signal: options.signal,
   })
   if (!response.ok) throw await parseGatewayError(response)

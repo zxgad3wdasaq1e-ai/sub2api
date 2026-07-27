@@ -31,6 +31,7 @@ export interface ImageJob {
   references?: File[]
   status: ImageJobStatus
   createdAt: number
+  remoteTaskId?: string
   error?: string
   abortController?: AbortController
 }

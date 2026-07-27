@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
-import { createReactiveImageJob, MAX_QUEUE_SIZE, remainingImageQueueCapacity } from '../queue'
+import { createReactiveImageJob, MAX_QUEUE_SIZE, recoverImageJob, remainingImageQueueCapacity, shouldPersistImageJobFailure } from '../queue'
 import type { ImageJob } from '../types'
 
 function queuedJob(): ImageJob {
@@ -38,5 +38,24 @@ describe('image studio queue', () => {
     expect(remainingImageQueueCapacity(15)).toBe(1)
     expect(remainingImageQueueCapacity(16)).toBe(0)
     expect(remainingImageQueueCapacity(20)).toBe(0)
+  })
+
+  it('keeps a running server task active when restoring after refresh', () => {
+    const stored = { ...queuedJob(), status: 'running' as const, remoteTaskId: 'imgtask_123' }
+
+    expect(recoverImageJob(stored)).toBe(stored)
+    expect(recoverImageJob(stored).status).toBe('running')
+  })
+
+  it('requeues legacy browser-owned requests that have no server task id', () => {
+    const stored = { ...queuedJob(), status: 'running' as const, error: 'old error' }
+
+    expect(recoverImageJob(stored)).toMatchObject({ status: 'queued', error: undefined })
+  })
+
+  it('does not turn a lifecycle abort or explicit cancellation into a failure', () => {
+    expect(shouldPersistImageJobFailure(new DOMException('Aborted', 'AbortError'), 'running')).toBe(false)
+    expect(shouldPersistImageJobFailure(new Error('late provider error'), 'canceled')).toBe(false)
+    expect(shouldPersistImageJobFailure(new Error('provider error'), 'running')).toBe(true)
   })
 })

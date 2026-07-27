@@ -136,6 +136,18 @@ describe('image studio ownership storage', () => {
     expect(stored[0]?.references).toHaveLength(1)
   })
 
+  it('persists the server task id needed to resume polling after logout', async () => {
+    const runningJob = { ...job('running-job', 101), status: 'running' as const, remoteTaskId: 'imgtask_123' }
+
+    await saveStudioJob(101, runningJob)
+
+    expect(await loadStudioJobs(101)).toMatchObject([{
+      id: 'running-job',
+      status: 'running',
+      remoteTaskId: 'imgtask_123',
+    }])
+  })
+
   it('deletes legacy records that have no trustworthy owner', async () => {
     await seedLegacyDatabase()
 
