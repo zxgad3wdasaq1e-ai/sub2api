@@ -942,6 +942,8 @@ export default {
         dailyLimit: '每日限额（USD）',
         weeklyLimit: '每周限额（USD）',
         monthlyLimit: '每月限额（USD）',
+        oneTime: '每个用户仅可订阅一次',
+        oneTimeHint: '开启后，用户成功购买过该分组后将永久无法再次订阅。',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
         noLimit: '无限制'

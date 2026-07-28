@@ -36,7 +36,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if !cfg.Enabled {
 		return nil, infraerrors.Forbidden("PAYMENT_DISABLED", "payment system is disabled")
 	}
-	plan, err := s.validateOrderInput(ctx, req, cfg)
+	plan, oneTimeSubscription, err := s.validateOrderInput(ctx, req, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if oauthResp != nil {
 		return oauthResp, nil
 	}
-	order, err := s.createOrderInTx(ctx, req, user, plan, cfg, orderAmount, limitAmount, feeRate, payAmount, sel)
+	order, err := s.createOrderInTx(ctx, req, user, plan, oneTimeSubscription, cfg, orderAmount, limitAmount, feeRate, payAmount, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -114,42 +114,135 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	return resp, nil
 }
 
-func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, error) {
+func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, bool, error) {
 	if req.OrderType == payment.OrderTypeBalance && cfg.BalanceDisabled {
-		return nil, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
+		return nil, false, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
 	}
 	if req.OrderType == payment.OrderTypeSubscription {
 		return s.validateSubOrder(ctx, req)
 	}
 	if math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) || req.Amount <= 0 {
-		return nil, infraerrors.BadRequest("INVALID_AMOUNT", "amount must be a positive number")
+		return nil, false, infraerrors.BadRequest("INVALID_AMOUNT", "amount must be a positive number")
 	}
 	if (cfg.MinAmount > 0 && req.Amount < cfg.MinAmount) || (cfg.MaxAmount > 0 && req.Amount > cfg.MaxAmount) {
-		return nil, infraerrors.BadRequest("INVALID_AMOUNT", "amount out of range").
+		return nil, false, infraerrors.BadRequest("INVALID_AMOUNT", "amount out of range").
 			WithMetadata(map[string]string{"min": fmt.Sprintf("%.2f", cfg.MinAmount), "max": fmt.Sprintf("%.2f", cfg.MaxAmount)})
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
-func (s *PaymentService) validateSubOrder(ctx context.Context, req CreateOrderRequest) (*dbent.SubscriptionPlan, error) {
+func (s *PaymentService) validateSubOrder(ctx context.Context, req CreateOrderRequest) (*dbent.SubscriptionPlan, bool, error) {
 	if req.PlanID == 0 {
-		return nil, infraerrors.BadRequest("INVALID_INPUT", "subscription order requires a plan")
+		return nil, false, infraerrors.BadRequest("INVALID_INPUT", "subscription order requires a plan")
 	}
 	plan, err := s.configService.GetPlan(ctx, req.PlanID)
 	if err != nil || !plan.ForSale {
-		return nil, infraerrors.NotFound("PLAN_NOT_AVAILABLE", "plan not found or not for sale")
+		return nil, false, infraerrors.NotFound("PLAN_NOT_AVAILABLE", "plan not found or not for sale")
 	}
 	group, err := s.groupRepo.GetByID(ctx, plan.GroupID)
 	if err != nil || group.Status != payment.EntityStatusActive {
-		return nil, infraerrors.NotFound("GROUP_NOT_FOUND", "subscription group is no longer available")
+		return nil, false, infraerrors.NotFound("GROUP_NOT_FOUND", "subscription group is no longer available")
 	}
 	if !group.IsSubscriptionType() {
-		return nil, infraerrors.BadRequest("GROUP_TYPE_MISMATCH", "group is not a subscription type")
+		return nil, false, infraerrors.BadRequest("GROUP_TYPE_MISMATCH", "group is not a subscription type")
 	}
-	return plan, nil
+	if group.OneTimeSubscription {
+		state, err := s.getOneTimeSubscriptionState(ctx, s.entClient, req.UserID, plan.GroupID, 0)
+		if err != nil {
+			return nil, false, fmt.Errorf("check one-time subscription eligibility: %w", err)
+		}
+		if err := validateOneTimeSubscriptionState(state); err != nil {
+			return nil, false, err
+		}
+	}
+	return plan, group.OneTimeSubscription, nil
 }
 
-func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, cfg *PaymentConfig, orderAmount, limitAmount, feeRate, payAmount float64, sel *payment.InstanceSelection) (*dbent.PaymentOrder, error) {
+type OneTimeSubscriptionState struct {
+	Purchased bool
+	Pending   bool
+}
+
+func oneTimeSubscriptionReleasedStatuses() []string {
+	return []string{
+		OrderStatusCancelled,
+		OrderStatusExpired,
+		OrderStatusFailed,
+	}
+}
+
+func (s *PaymentService) GetOneTimeSubscriptionStates(ctx context.Context, userID int64, groupIDs []int64) (map[int64]OneTimeSubscriptionState, error) {
+	states := make(map[int64]OneTimeSubscriptionState, len(groupIDs))
+	if len(groupIDs) == 0 {
+		return states, nil
+	}
+
+	orders, err := s.entClient.PaymentOrder.Query().Where(
+		paymentorder.UserIDEQ(userID),
+		paymentorder.OrderTypeEQ(payment.OrderTypeSubscription),
+		paymentorder.SubscriptionGroupIDIn(groupIDs...),
+		paymentorder.Or(
+			paymentorder.PaidAtNotNil(),
+			paymentorder.StatusNotIn(oneTimeSubscriptionReleasedStatuses()...),
+		),
+	).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, order := range orders {
+		if order.SubscriptionGroupID == nil {
+			continue
+		}
+		state := states[*order.SubscriptionGroupID]
+		if order.PaidAt != nil || order.Status != OrderStatusPending {
+			state.Purchased = true
+		} else {
+			state.Pending = true
+		}
+		states[*order.SubscriptionGroupID] = state
+	}
+	return states, nil
+}
+
+func (s *PaymentService) getOneTimeSubscriptionState(ctx context.Context, client *dbent.Client, userID, groupID, excludeOrderID int64) (OneTimeSubscriptionState, error) {
+	query := client.PaymentOrder.Query().Where(
+		paymentorder.UserIDEQ(userID),
+		paymentorder.OrderTypeEQ(payment.OrderTypeSubscription),
+		paymentorder.SubscriptionGroupIDEQ(groupID),
+		paymentorder.Or(
+			paymentorder.PaidAtNotNil(),
+			paymentorder.StatusNotIn(oneTimeSubscriptionReleasedStatuses()...),
+		),
+	)
+	if excludeOrderID > 0 {
+		query = query.Where(paymentorder.IDNEQ(excludeOrderID))
+	}
+	orders, err := query.All(ctx)
+	if err != nil {
+		return OneTimeSubscriptionState{}, err
+	}
+	state := OneTimeSubscriptionState{}
+	for _, order := range orders {
+		if order.PaidAt != nil || order.Status != OrderStatusPending {
+			state.Purchased = true
+		} else {
+			state.Pending = true
+		}
+	}
+	return state, nil
+}
+
+func validateOneTimeSubscriptionState(state OneTimeSubscriptionState) error {
+	if state.Purchased {
+		return infraerrors.Conflict("ONE_TIME_SUBSCRIPTION_ALREADY_PURCHASED", "this subscription can only be purchased once per user")
+	}
+	if state.Pending {
+		return infraerrors.Conflict("ONE_TIME_SUBSCRIPTION_PENDING", "an order for this one-time subscription is already pending")
+	}
+	return nil
+}
+
+func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderRequest, user *User, plan *dbent.SubscriptionPlan, oneTimeSubscription bool, cfg *PaymentConfig, orderAmount, limitAmount, feeRate, payAmount float64, sel *payment.InstanceSelection) (*dbent.PaymentOrder, error) {
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -160,6 +253,15 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	}
 	if err := s.checkDailyLimit(ctx, tx, req.UserID, limitAmount, cfg.DailyLimit); err != nil {
 		return nil, err
+	}
+	if oneTimeSubscription && plan != nil {
+		state, err := s.getOneTimeSubscriptionState(ctx, tx.Client(), req.UserID, plan.GroupID, 0)
+		if err != nil {
+			return nil, fmt.Errorf("check one-time subscription eligibility: %w", err)
+		}
+		if err := validateOneTimeSubscriptionState(state); err != nil {
+			return nil, err
+		}
 	}
 	tm := cfg.OrderTimeoutMin
 	if tm <= 0 {
@@ -209,8 +311,14 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	if plan != nil {
 		b.SetPlanID(plan.ID).SetSubscriptionGroupID(plan.GroupID).SetSubscriptionDays(psComputeValidityDays(plan.ValidityDays, plan.ValidityUnit))
 	}
+	if oneTimeSubscription {
+		b.SetOneTimeSubscription(true)
+	}
 	order, err := b.Save(ctx)
 	if err != nil {
+		if oneTimeSubscription && dbent.IsConstraintError(err) {
+			return nil, infraerrors.Conflict("ONE_TIME_SUBSCRIPTION_UNAVAILABLE", "this subscription can only be purchased once per user")
+		}
 		return nil, fmt.Errorf("create order: %w", err)
 	}
 	code := fmt.Sprintf("PAY-%d-%d", order.ID, time.Now().UnixNano()%100000)

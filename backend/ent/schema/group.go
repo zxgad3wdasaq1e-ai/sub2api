@@ -94,6 +94,9 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}),
 		field.Int("default_validity_days").
 			Default(30),
+		field.Bool("one_time_subscription").
+			Default(false).
+			Comment("Whether each user may purchase this subscription group only once"),
 
 		// 图片生成计费配置（antigravity 和 gemini 平台使用）
 		field.Bool("allow_image_generation").

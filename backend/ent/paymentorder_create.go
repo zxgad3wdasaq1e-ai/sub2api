@@ -211,6 +211,20 @@ func (_c *PaymentOrderCreate) SetNillableSubscriptionDays(v *int) *PaymentOrderC
 	return _c
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_c *PaymentOrderCreate) SetOneTimeSubscription(v bool) *PaymentOrderCreate {
+	_c.mutation.SetOneTimeSubscription(v)
+	return _c
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableOneTimeSubscription(v *bool) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetOneTimeSubscription(*v)
+	}
+	return _c
+}
+
 // SetProviderInstanceID sets the "provider_instance_id" field.
 func (_c *PaymentOrderCreate) SetProviderInstanceID(v string) *PaymentOrderCreate {
 	_c.mutation.SetProviderInstanceID(v)
@@ -525,6 +539,10 @@ func (_c *PaymentOrderCreate) defaults() {
 		v := paymentorder.DefaultOrderType
 		_c.mutation.SetOrderType(v)
 	}
+	if _, ok := _c.mutation.OneTimeSubscription(); !ok {
+		v := paymentorder.DefaultOneTimeSubscription
+		_c.mutation.SetOneTimeSubscription(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := paymentorder.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -616,6 +634,9 @@ func (_c *PaymentOrderCreate) check() error {
 		if err := paymentorder.OrderTypeValidator(v); err != nil {
 			return &ValidationError{Name: "order_type", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.order_type": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.OneTimeSubscription(); !ok {
+		return &ValidationError{Name: "one_time_subscription", err: errors.New(`ent: missing required field "PaymentOrder.one_time_subscription"`)}
 	}
 	if v, ok := _c.mutation.ProviderInstanceID(); ok {
 		if err := paymentorder.ProviderInstanceIDValidator(v); err != nil {
@@ -768,6 +789,10 @@ func (_c *PaymentOrderCreate) createSpec() (*PaymentOrder, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.SubscriptionDays(); ok {
 		_spec.SetField(paymentorder.FieldSubscriptionDays, field.TypeInt, value)
 		_node.SubscriptionDays = &value
+	}
+	if value, ok := _c.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(paymentorder.FieldOneTimeSubscription, field.TypeBool, value)
+		_node.OneTimeSubscription = value
 	}
 	if value, ok := _c.mutation.ProviderInstanceID(); ok {
 		_spec.SetField(paymentorder.FieldProviderInstanceID, field.TypeString, value)
@@ -1213,6 +1238,18 @@ func (u *PaymentOrderUpsert) AddSubscriptionDays(v int) *PaymentOrderUpsert {
 // ClearSubscriptionDays clears the value of the "subscription_days" field.
 func (u *PaymentOrderUpsert) ClearSubscriptionDays() *PaymentOrderUpsert {
 	u.SetNull(paymentorder.FieldSubscriptionDays)
+	return u
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *PaymentOrderUpsert) SetOneTimeSubscription(v bool) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldOneTimeSubscription, v)
+	return u
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateOneTimeSubscription() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldOneTimeSubscription)
 	return u
 }
 
@@ -1925,6 +1962,20 @@ func (u *PaymentOrderUpsertOne) UpdateSubscriptionDays() *PaymentOrderUpsertOne 
 func (u *PaymentOrderUpsertOne) ClearSubscriptionDays() *PaymentOrderUpsertOne {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.ClearSubscriptionDays()
+	})
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *PaymentOrderUpsertOne) SetOneTimeSubscription(v bool) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetOneTimeSubscription(v)
+	})
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateOneTimeSubscription() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateOneTimeSubscription()
 	})
 }
 
@@ -2857,6 +2908,20 @@ func (u *PaymentOrderUpsertBulk) UpdateSubscriptionDays() *PaymentOrderUpsertBul
 func (u *PaymentOrderUpsertBulk) ClearSubscriptionDays() *PaymentOrderUpsertBulk {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.ClearSubscriptionDays()
+	})
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *PaymentOrderUpsertBulk) SetOneTimeSubscription(v bool) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetOneTimeSubscription(v)
+	})
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateOneTimeSubscription() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateOneTimeSubscription()
 	})
 }
 

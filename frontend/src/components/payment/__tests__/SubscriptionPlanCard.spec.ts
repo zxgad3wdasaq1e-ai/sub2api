@@ -18,12 +18,16 @@ const i18n = createI18n({
         months: "months",
         perMonth: "month",
         models: "Models",
+        subscribeNow: "Subscribe now",
+        renewNow: "Renew",
         planCard: {
           quota: "Quota",
           rate: "Rate",
           unlimited: "Unlimited",
+          oneTimeOffer: "First-purchase offer · One per user",
+          alreadyPurchased: "Purchased · Cannot subscribe again",
+          pendingOrder: "Pending order exists",
         },
-        subscribeNow: "Subscribe now",
       },
     },
   },
@@ -85,5 +89,19 @@ describe("SubscriptionPlanCard", () => {
     expect(cnyPlan).toContain("¥20CNY");
     expect(mountPlanCard("openai", { currency: "USD" }).text()).toContain("$10USD");
     expect(mountPlanCard("openai", { currency: "" }).text()).toContain("$10");
+  });
+
+  it("shows and enforces the one-time purchase state", async () => {
+    const wrapper = mountPlanCard("openai", {
+      one_time_subscription: true,
+      already_purchased: true,
+      purchase_available: false,
+    });
+
+    expect(wrapper.text()).toContain("payment.planCard.oneTimeOffer");
+    expect(wrapper.text()).toContain("payment.planCard.alreadyPurchased");
+    expect(wrapper.get("button").attributes("disabled")).toBeDefined();
+    await wrapper.get("button").trigger("click");
+    expect(wrapper.emitted("select")).toBeUndefined();
   });
 });

@@ -287,6 +287,20 @@ func (_c *GroupCreate) SetNillableDefaultValidityDays(v *int) *GroupCreate {
 	return _c
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_c *GroupCreate) SetOneTimeSubscription(v bool) *GroupCreate {
+	_c.mutation.SetOneTimeSubscription(v)
+	return _c
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOneTimeSubscription(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetOneTimeSubscription(*v)
+	}
+	return _c
+}
+
 // SetAllowImageGeneration sets the "allow_image_generation" field.
 func (_c *GroupCreate) SetAllowImageGeneration(v bool) *GroupCreate {
 	_c.mutation.SetAllowImageGeneration(v)
@@ -872,6 +886,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultDefaultValidityDays
 		_c.mutation.SetDefaultValidityDays(v)
 	}
+	if _, ok := _c.mutation.OneTimeSubscription(); !ok {
+		v := group.DefaultOneTimeSubscription
+		_c.mutation.SetOneTimeSubscription(v)
+	}
 	if _, ok := _c.mutation.AllowImageGeneration(); !ok {
 		v := group.DefaultAllowImageGeneration
 		_c.mutation.SetAllowImageGeneration(v)
@@ -1030,6 +1048,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.DefaultValidityDays(); !ok {
 		return &ValidationError{Name: "default_validity_days", err: errors.New(`ent: missing required field "Group.default_validity_days"`)}
+	}
+	if _, ok := _c.mutation.OneTimeSubscription(); !ok {
+		return &ValidationError{Name: "one_time_subscription", err: errors.New(`ent: missing required field "Group.one_time_subscription"`)}
 	}
 	if _, ok := _c.mutation.AllowImageGeneration(); !ok {
 		return &ValidationError{Name: "allow_image_generation", err: errors.New(`ent: missing required field "Group.allow_image_generation"`)}
@@ -1198,6 +1219,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DefaultValidityDays(); ok {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)
 		_node.DefaultValidityDays = value
+	}
+	if value, ok := _c.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(group.FieldOneTimeSubscription, field.TypeBool, value)
+		_node.OneTimeSubscription = value
 	}
 	if value, ok := _c.mutation.AllowImageGeneration(); ok {
 		_spec.SetField(group.FieldAllowImageGeneration, field.TypeBool, value)
@@ -1742,6 +1767,18 @@ func (u *GroupUpsert) UpdateDefaultValidityDays() *GroupUpsert {
 // AddDefaultValidityDays adds v to the "default_validity_days" field.
 func (u *GroupUpsert) AddDefaultValidityDays(v int) *GroupUpsert {
 	u.Add(group.FieldDefaultValidityDays, v)
+	return u
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *GroupUpsert) SetOneTimeSubscription(v bool) *GroupUpsert {
+	u.Set(group.FieldOneTimeSubscription, v)
+	return u
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOneTimeSubscription() *GroupUpsert {
+	u.SetExcluded(group.FieldOneTimeSubscription)
 	return u
 }
 
@@ -2615,6 +2652,20 @@ func (u *GroupUpsertOne) AddDefaultValidityDays(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateDefaultValidityDays() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultValidityDays()
+	})
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *GroupUpsertOne) SetOneTimeSubscription(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOneTimeSubscription(v)
+	})
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOneTimeSubscription() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOneTimeSubscription()
 	})
 }
 
@@ -3739,6 +3790,20 @@ func (u *GroupUpsertBulk) AddDefaultValidityDays(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateDefaultValidityDays() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultValidityDays()
+	})
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *GroupUpsertBulk) SetOneTimeSubscription(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOneTimeSubscription(v)
+	})
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOneTimeSubscription() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOneTimeSubscription()
 	})
 }
 

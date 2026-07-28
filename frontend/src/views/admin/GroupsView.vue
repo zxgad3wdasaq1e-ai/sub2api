@@ -694,6 +694,24 @@
             v-if="createForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label">{{ t("admin.groups.subscription.oneTime") }}</label>
+                <p class="input-hint">{{ t("admin.groups.subscription.oneTimeHint") }}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="createForm.one_time_subscription"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                  createForm.one_time_subscription ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600',
+                ]"
+                @click="createForm.one_time_subscription = !createForm.one_time_subscription"
+              >
+                <span :class="['inline-block h-4 w-4 rounded-full bg-white shadow transition-transform', createForm.one_time_subscription ? 'translate-x-6' : 'translate-x-1']" />
+              </button>
+            </div>
             <div>
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
@@ -2208,6 +2226,24 @@
             v-if="editForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label">{{ t("admin.groups.subscription.oneTime") }}</label>
+                <p class="input-hint">{{ t("admin.groups.subscription.oneTimeHint") }}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="editForm.one_time_subscription"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                  editForm.one_time_subscription ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600',
+                ]"
+                @click="editForm.one_time_subscription = !editForm.one_time_subscription"
+              >
+                <span :class="['inline-block h-4 w-4 rounded-full bg-white shadow transition-transform', editForm.one_time_subscription ? 'translate-x-6' : 'translate-x-1']" />
+              </button>
+            </div>
             <div>
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
@@ -4018,6 +4054,7 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  one_time_subscription: false,
   // 图片生成计费配置
   allow_image_generation: false,
   allow_batch_image_generation: false,
@@ -4365,6 +4402,7 @@ const editForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  one_time_subscription: false,
   // 图片生成计费配置
   allow_image_generation: false,
   allow_batch_image_generation: false,
@@ -4772,6 +4810,7 @@ const closeCreateModal = () => {
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
+  createForm.one_time_subscription = false;
   createForm.allow_image_generation = false;
   createForm.allow_batch_image_generation = false;
   createForm.image_rate_independent = false;
@@ -4938,6 +4977,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
+  editForm.one_time_subscription = group.one_time_subscription ?? false;
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
     group.allow_batch_image_generation ?? false;

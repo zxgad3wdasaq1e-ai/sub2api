@@ -365,6 +365,20 @@ func (_u *PaymentOrderUpdate) ClearSubscriptionDays() *PaymentOrderUpdate {
 	return _u
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_u *PaymentOrderUpdate) SetOneTimeSubscription(v bool) *PaymentOrderUpdate {
+	_u.mutation.SetOneTimeSubscription(v)
+	return _u
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableOneTimeSubscription(v *bool) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetOneTimeSubscription(*v)
+	}
+	return _u
+}
+
 // SetProviderInstanceID sets the "provider_instance_id" field.
 func (_u *PaymentOrderUpdate) SetProviderInstanceID(v string) *PaymentOrderUpdate {
 	_u.mutation.SetProviderInstanceID(v)
@@ -941,6 +955,9 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	if _u.mutation.SubscriptionDaysCleared() {
 		_spec.ClearField(paymentorder.FieldSubscriptionDays, field.TypeInt)
 	}
+	if value, ok := _u.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(paymentorder.FieldOneTimeSubscription, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.ProviderInstanceID(); ok {
 		_spec.SetField(paymentorder.FieldProviderInstanceID, field.TypeString, value)
 	}
@@ -1425,6 +1442,20 @@ func (_u *PaymentOrderUpdateOne) AddSubscriptionDays(v int) *PaymentOrderUpdateO
 // ClearSubscriptionDays clears the value of the "subscription_days" field.
 func (_u *PaymentOrderUpdateOne) ClearSubscriptionDays() *PaymentOrderUpdateOne {
 	_u.mutation.ClearSubscriptionDays()
+	return _u
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_u *PaymentOrderUpdateOne) SetOneTimeSubscription(v bool) *PaymentOrderUpdateOne {
+	_u.mutation.SetOneTimeSubscription(v)
+	return _u
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableOneTimeSubscription(v *bool) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetOneTimeSubscription(*v)
+	}
 	return _u
 }
 
@@ -2033,6 +2064,9 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if _u.mutation.SubscriptionDaysCleared() {
 		_spec.ClearField(paymentorder.FieldSubscriptionDays, field.TypeInt)
+	}
+	if value, ok := _u.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(paymentorder.FieldOneTimeSubscription, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ProviderInstanceID(); ok {
 		_spec.SetField(paymentorder.FieldProviderInstanceID, field.TypeString, value)

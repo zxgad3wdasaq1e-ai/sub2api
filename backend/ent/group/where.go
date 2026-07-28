@@ -150,6 +150,11 @@ func DefaultValidityDays(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldDefaultValidityDays, v))
 }
 
+// OneTimeSubscription applies equality check predicate on the "one_time_subscription" field. It's identical to OneTimeSubscriptionEQ.
+func OneTimeSubscription(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOneTimeSubscription, v))
+}
+
 // AllowImageGeneration applies equality check predicate on the "allow_image_generation" field. It's identical to AllowImageGenerationEQ.
 func AllowImageGeneration(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowImageGeneration, v))
@@ -1238,6 +1243,16 @@ func DefaultValidityDaysLT(v int) predicate.Group {
 // DefaultValidityDaysLTE applies the LTE predicate on the "default_validity_days" field.
 func DefaultValidityDaysLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldDefaultValidityDays, v))
+}
+
+// OneTimeSubscriptionEQ applies the EQ predicate on the "one_time_subscription" field.
+func OneTimeSubscriptionEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOneTimeSubscription, v))
+}
+
+// OneTimeSubscriptionNEQ applies the NEQ predicate on the "one_time_subscription" field.
+func OneTimeSubscriptionNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOneTimeSubscription, v))
 }
 
 // AllowImageGenerationEQ applies the EQ predicate on the "allow_image_generation" field.

@@ -502,6 +502,15 @@ func (s *PaymentService) doSub(ctx context.Context, o *dbent.PaymentOrder, lease
 	if err != nil || g.Status != payment.EntityStatusActive {
 		return fmt.Errorf("group %d no longer exists or inactive", gid)
 	}
+	if g.OneTimeSubscription {
+		state, err := s.getOneTimeSubscriptionState(ctx, s.entClient, o.UserID, gid, o.ID)
+		if err != nil {
+			return fmt.Errorf("check one-time subscription eligibility: %w", err)
+		}
+		if state.Purchased {
+			return infraerrors.Conflict("ONE_TIME_SUBSCRIPTION_ALREADY_PURCHASED", "this subscription can only be purchased once per user")
+		}
+	}
 	if err := s.ensurePaymentSubscriptionAssigned(ctx, o, gid, days); err != nil {
 		return err
 	}

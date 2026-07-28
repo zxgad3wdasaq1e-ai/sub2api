@@ -20,6 +20,10 @@
               {{ pLabel }}
             </span>
           </div>
+          <div v-if="plan.one_time_subscription" class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+            <Icon name="gift" size="sm" />
+            <span>{{ t('payment.planCard.oneTimeOffer') }}</span>
+          </div>
           <p v-if="plan.description" class="mt-0.5 text-xs leading-relaxed text-gray-500 dark:text-dark-400 line-clamp-2">
             {{ plan.description }}
           </p>
@@ -90,10 +94,11 @@
       <!-- Subscribe Button -->
       <button
         type="button"
-        :class="['w-full rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-[0.98]', btnClass]"
+        :disabled="!purchaseAvailable"
+        :class="['w-full rounded-xl py-2.5 text-sm font-semibold transition-all', purchaseAvailable ? ['active:scale-[0.98]', btnClass] : 'cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-dark-600 dark:text-dark-300']"
         @click="emit('select', plan)"
       >
-        {{ isRenewal ? t('payment.renewNow') : t('payment.subscribeNow') }}
+        {{ actionLabel }}
       </button>
     </div>
   </div>
@@ -108,6 +113,7 @@ import { useAppStore } from '@/stores/app'
 import { hasPeakRate as groupHasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { planValiditySuffix } from './validity'
 import { currencySymbol } from '@/components/payment/currency'
+import Icon from '@/components/icons/Icon.vue'
 import {
   platformAccentBarClass,
   platformBadgeLightClass,
@@ -127,6 +133,12 @@ const platform = computed(() => props.plan.group_platform || '')
 const isRenewal = computed(() =>
   props.activeSubscriptions?.some(s => s.group_id === props.plan.group_id && s.status === 'active') ?? false
 )
+const purchaseAvailable = computed(() => props.plan.purchase_available !== false)
+const actionLabel = computed(() => {
+  if (props.plan.already_purchased) return t('payment.planCard.alreadyPurchased')
+  if (!purchaseAvailable.value) return t('payment.planCard.pendingOrder')
+  return isRenewal.value ? t('payment.renewNow') : t('payment.subscribeNow')
+})
 
 // Derived color classes from central config
 const accentClass = computed(() => platformAccentBarClass(platform.value))

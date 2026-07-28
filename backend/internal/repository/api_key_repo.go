@@ -937,6 +937,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		VideoPrice1080P:                 g.VideoPrice1080p,
 		WebSearchPricePerCall:           g.WebSearchPricePerCall,
 		DefaultValidityDays:             g.DefaultValidityDays,
+		OneTimeSubscription:             g.OneTimeSubscription,
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,

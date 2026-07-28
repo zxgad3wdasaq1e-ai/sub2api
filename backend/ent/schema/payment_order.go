@@ -87,6 +87,9 @@ func (PaymentOrder) Fields() []ent.Field {
 		field.Int("subscription_days").
 			Optional().
 			Nillable(),
+		field.Bool("one_time_subscription").
+			Default(false).
+			Comment("Snapshot of the subscription group's one-time purchase rule"),
 		field.String("provider_instance_id").
 			Optional().
 			Nillable().
@@ -195,5 +198,9 @@ func (PaymentOrder) Indexes() []ent.Index {
 		index.Fields("paid_at"),
 		index.Fields("payment_type", "paid_at"),
 		index.Fields("order_type"),
+		index.Fields("user_id", "subscription_group_id").
+			Unique().
+			StorageKey("idx_payment_orders_one_time_subscription_active").
+			Annotations(entsql.IndexWhere("one_time_subscription = TRUE AND subscription_group_id IS NOT NULL AND (status NOT IN ('CANCELLED', 'EXPIRED', 'FAILED') OR paid_at IS NOT NULL)")),
 	}
 }

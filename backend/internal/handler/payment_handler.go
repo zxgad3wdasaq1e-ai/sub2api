@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -44,6 +45,10 @@ func (h *PaymentHandler) GetPaymentConfig(c *gin.Context) {
 // GetPlans returns subscription plans available for sale.
 // GET /api/v1/payment/plans
 func (h *PaymentHandler) GetPlans(c *gin.Context) {
+	subject, ok := requireAuth(c)
+	if !ok {
+		return
+	}
 	plans, err := h.configService.ListPlansForSale(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -51,31 +56,40 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 	}
 	// Enrich plans with group platform for frontend color coding
 	type planWithPlatform struct {
-		ID                 int64    `json:"id"`
-		GroupID            int64    `json:"group_id"`
-		GroupPlatform      string   `json:"group_platform"`
-		GroupName          string   `json:"group_name"`
-		RateMultiplier     float64  `json:"rate_multiplier"`
-		PeakRateEnabled    bool     `json:"peak_rate_enabled"`
-		PeakStart          string   `json:"peak_start"`
-		PeakEnd            string   `json:"peak_end"`
-		PeakRateMultiplier float64  `json:"peak_rate_multiplier"`
-		Name               string   `json:"name"`
-		Description        string   `json:"description"`
-		Price              float64  `json:"price"`
-		OriginalPrice      *float64 `json:"original_price,omitempty"`
-		Currency           string   `json:"currency,omitempty"`
-		ValidityDays       int      `json:"validity_days"`
-		ValidityUnit       string   `json:"validity_unit"`
-		Features           string   `json:"features"`
-		ProductName        string   `json:"product_name"`
-		ForSale            bool     `json:"for_sale"`
-		SortOrder          int      `json:"sort_order"`
+		ID                  int64    `json:"id"`
+		GroupID             int64    `json:"group_id"`
+		GroupPlatform       string   `json:"group_platform"`
+		GroupName           string   `json:"group_name"`
+		RateMultiplier      float64  `json:"rate_multiplier"`
+		PeakRateEnabled     bool     `json:"peak_rate_enabled"`
+		PeakStart           string   `json:"peak_start"`
+		PeakEnd             string   `json:"peak_end"`
+		PeakRateMultiplier  float64  `json:"peak_rate_multiplier"`
+		Name                string   `json:"name"`
+		Description         string   `json:"description"`
+		Price               float64  `json:"price"`
+		OriginalPrice       *float64 `json:"original_price,omitempty"`
+		Currency            string   `json:"currency,omitempty"`
+		ValidityDays        int      `json:"validity_days"`
+		ValidityUnit        string   `json:"validity_unit"`
+		Features            string   `json:"features"`
+		ProductName         string   `json:"product_name"`
+		ForSale             bool     `json:"for_sale"`
+		SortOrder           int      `json:"sort_order"`
+		OneTimeSubscription bool     `json:"one_time_subscription"`
+		AlreadyPurchased    bool     `json:"already_purchased"`
+		PurchaseAvailable   bool     `json:"purchase_available"`
 	}
 	groupInfo := h.configService.GetGroupInfoMap(c.Request.Context(), plans)
+	oneTimeStates, err := h.oneTimeSubscriptionStates(c.Request.Context(), subject.UserID, plans, groupInfo)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	result := make([]planWithPlatform, 0, len(plans))
 	for _, p := range plans {
 		gi := groupInfo[p.GroupID]
+		state := oneTimeStates[p.GroupID]
 		result = append(result, planWithPlatform{
 			ID: int64(p.ID), GroupID: p.GroupID,
 			GroupPlatform: gi.Platform, GroupName: gi.Name,
@@ -85,6 +99,9 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 			Currency:     p.Currency,
 			ValidityDays: p.ValidityDays, ValidityUnit: p.ValidityUnit, Features: p.Features,
 			ProductName: p.ProductName, ForSale: p.ForSale, SortOrder: p.SortOrder,
+			OneTimeSubscription: gi.OneTimeSubscription,
+			AlreadyPurchased:    state.Purchased,
+			PurchaseAvailable:   !gi.OneTimeSubscription || (!state.Purchased && !state.Pending),
 		})
 	}
 	response.Success(c, result)
@@ -95,6 +112,10 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 // GET /api/v1/payment/checkout-info
 func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	ctx := c.Request.Context()
+	subject, ok := requireAuth(c)
+	if !ok {
+		return
+	}
 
 	// Fetch limits (methods + global range)
 	limitsResp, err := h.configService.GetAvailableMethodLimits(ctx)
@@ -113,9 +134,15 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	// Fetch plans with group info
 	plans, _ := h.configService.ListPlansForSale(ctx)
 	groupInfo := h.configService.GetGroupInfoMap(ctx, plans)
+	oneTimeStates, err := h.oneTimeSubscriptionStates(ctx, subject.UserID, plans, groupInfo)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	planList := make([]checkoutPlan, 0, len(plans))
 	for _, p := range plans {
 		gi := groupInfo[p.GroupID]
+		state := oneTimeStates[p.GroupID]
 		planList = append(planList, checkoutPlan{
 			ID: int64(p.ID), GroupID: p.GroupID,
 			GroupPlatform: gi.Platform, GroupName: gi.Name,
@@ -128,7 +155,10 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 			Name:        p.Name, Description: p.Description, Price: p.Price, OriginalPrice: p.OriginalPrice,
 			Currency:     p.Currency,
 			ValidityDays: p.ValidityDays, ValidityUnit: p.ValidityUnit, Features: parseFeatures(p.Features),
-			ProductName: p.ProductName,
+			ProductName:         p.ProductName,
+			OneTimeSubscription: gi.OneTimeSubscription,
+			AlreadyPurchased:    state.Purchased,
+			PurchaseAvailable:   !gi.OneTimeSubscription || (!state.Purchased && !state.Pending),
 		})
 	}
 
@@ -164,28 +194,47 @@ type checkoutInfoResponse struct {
 }
 
 type checkoutPlan struct {
-	ID                 int64    `json:"id"`
-	GroupID            int64    `json:"group_id"`
-	GroupPlatform      string   `json:"group_platform"`
-	GroupName          string   `json:"group_name"`
-	RateMultiplier     float64  `json:"rate_multiplier"`
-	PeakRateEnabled    bool     `json:"peak_rate_enabled"`
-	PeakStart          string   `json:"peak_start"`
-	PeakEnd            string   `json:"peak_end"`
-	PeakRateMultiplier float64  `json:"peak_rate_multiplier"`
-	DailyLimitUSD      *float64 `json:"daily_limit_usd"`
-	WeeklyLimitUSD     *float64 `json:"weekly_limit_usd"`
-	MonthlyLimitUSD    *float64 `json:"monthly_limit_usd"`
-	ModelScopes        []string `json:"supported_model_scopes"`
-	Name               string   `json:"name"`
-	Description        string   `json:"description"`
-	Price              float64  `json:"price"`
-	OriginalPrice      *float64 `json:"original_price,omitempty"`
-	Currency           string   `json:"currency,omitempty"`
-	ValidityDays       int      `json:"validity_days"`
-	ValidityUnit       string   `json:"validity_unit"`
-	Features           []string `json:"features"`
-	ProductName        string   `json:"product_name"`
+	ID                  int64    `json:"id"`
+	GroupID             int64    `json:"group_id"`
+	GroupPlatform       string   `json:"group_platform"`
+	GroupName           string   `json:"group_name"`
+	RateMultiplier      float64  `json:"rate_multiplier"`
+	PeakRateEnabled     bool     `json:"peak_rate_enabled"`
+	PeakStart           string   `json:"peak_start"`
+	PeakEnd             string   `json:"peak_end"`
+	PeakRateMultiplier  float64  `json:"peak_rate_multiplier"`
+	DailyLimitUSD       *float64 `json:"daily_limit_usd"`
+	WeeklyLimitUSD      *float64 `json:"weekly_limit_usd"`
+	MonthlyLimitUSD     *float64 `json:"monthly_limit_usd"`
+	ModelScopes         []string `json:"supported_model_scopes"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	Price               float64  `json:"price"`
+	OriginalPrice       *float64 `json:"original_price,omitempty"`
+	Currency            string   `json:"currency,omitempty"`
+	ValidityDays        int      `json:"validity_days"`
+	ValidityUnit        string   `json:"validity_unit"`
+	Features            []string `json:"features"`
+	ProductName         string   `json:"product_name"`
+	OneTimeSubscription bool     `json:"one_time_subscription"`
+	AlreadyPurchased    bool     `json:"already_purchased"`
+	PurchaseAvailable   bool     `json:"purchase_available"`
+}
+
+func (h *PaymentHandler) oneTimeSubscriptionStates(ctx context.Context, userID int64, plans []*dbent.SubscriptionPlan, groupInfo map[int64]service.PlanGroupInfo) (map[int64]service.OneTimeSubscriptionState, error) {
+	groupIDs := make([]int64, 0, len(plans))
+	seen := make(map[int64]struct{}, len(plans))
+	for _, plan := range plans {
+		if !groupInfo[plan.GroupID].OneTimeSubscription {
+			continue
+		}
+		if _, exists := seen[plan.GroupID]; exists {
+			continue
+		}
+		seen[plan.GroupID] = struct{}{}
+		groupIDs = append(groupIDs, plan.GroupID)
+	}
+	return h.paymentService.GetOneTimeSubscriptionStates(ctx, userID, groupIDs)
 }
 
 // parseFeatures splits a newline-separated features string into a string slice.
