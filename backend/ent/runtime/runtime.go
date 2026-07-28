@@ -1727,6 +1727,10 @@ func init() {
 	redeemcodeDescValidityDays := redeemcodeFields[10].Descriptor()
 	// redeemcode.DefaultValidityDays holds the default value on creation for the validity_days field.
 	redeemcode.DefaultValidityDays = redeemcodeDescValidityDays.Default.(int)
+	// redeemcodeDescOneTimeSubscription is the schema descriptor for one_time_subscription field.
+	redeemcodeDescOneTimeSubscription := redeemcodeFields[11].Descriptor()
+	// redeemcode.DefaultOneTimeSubscription holds the default value on creation for the one_time_subscription field.
+	redeemcode.DefaultOneTimeSubscription = redeemcodeDescOneTimeSubscription.Default.(bool)
 	securitysecretMixin := schema.SecuritySecret{}.Mixin()
 	securitysecretMixinFields0 := securitysecretMixin[0].Fields()
 	_ = securitysecretMixinFields0

@@ -60,15 +60,56 @@ func TestGetOneTimeSubscriptionStates(t *testing.T) {
 	createOrder(12, OrderStatusCompleted, nil)
 	createOrder(13, OrderStatusFailed, &now)
 	createOrder(14, "FUTURE_PAID_STATE", nil)
+	redeemGroup, err := client.Group.Create().SetName("Redeemed one-time group").Save(ctx)
+	require.NoError(t, err)
+	_, err = client.RedeemCode.Create().
+		SetCode("ONE-TIME-REDEEMED").
+		SetType(RedeemTypeSubscription).
+		SetStatus(StatusUsed).
+		SetUsedBy(user.ID).
+		SetUsedAt(now).
+		SetGroupID(redeemGroup.ID).
+		Save(ctx)
+	require.NoError(t, err)
 
 	svc := &PaymentService{entClient: client}
-	states, err := svc.GetOneTimeSubscriptionStates(ctx, user.ID, []int64{10, 11, 12, 13, 14})
+	states, err := svc.GetOneTimeSubscriptionStates(ctx, user.ID, []int64{10, 11, 12, 13, 14, redeemGroup.ID})
 	require.NoError(t, err)
 	require.Equal(t, OneTimeSubscriptionState{Pending: true}, states[10])
 	require.Equal(t, OneTimeSubscriptionState{}, states[11])
 	require.Equal(t, OneTimeSubscriptionState{Purchased: true}, states[12])
 	require.Equal(t, OneTimeSubscriptionState{Purchased: true}, states[13])
 	require.Equal(t, OneTimeSubscriptionState{Purchased: true}, states[14])
+	require.Equal(t, OneTimeSubscriptionState{Purchased: true}, states[redeemGroup.ID])
+}
+
+func TestOneTimeSubscriptionRedeemUniqueConstraint(t *testing.T) {
+	ctx := context.Background()
+	client := newOneTimeSubscriptionTestClient(t)
+	user, err := client.User.Create().
+		SetEmail("one-time-redeem-constraint@example.com").
+		SetPasswordHash("hash").
+		SetUsername("one-time-redeem-constraint").
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().SetName("One-time redeem constraint").Save(ctx)
+	require.NoError(t, err)
+
+	createRedeem := func(code string) error {
+		_, err := client.RedeemCode.Create().
+			SetCode(code).
+			SetType(RedeemTypeSubscription).
+			SetStatus(StatusUsed).
+			SetUsedBy(user.ID).
+			SetUsedAt(time.Now()).
+			SetGroupID(group.ID).
+			SetOneTimeSubscription(true).
+			Save(ctx)
+		return err
+	}
+
+	require.NoError(t, createRedeem("ONE-TIME-REDEEM-1"))
+	require.True(t, dbent.IsConstraintError(createRedeem("ONE-TIME-REDEEM-2")))
 }
 
 func newOneTimeSubscriptionTestClient(t *testing.T) *dbent.Client {

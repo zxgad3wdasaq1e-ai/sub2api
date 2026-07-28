@@ -13,6 +13,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
+	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/payment/provider"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -201,10 +202,31 @@ func (s *PaymentService) GetOneTimeSubscriptionStates(ctx context.Context, userI
 		}
 		states[*order.SubscriptionGroupID] = state
 	}
+	redeemCodes, err := s.entClient.RedeemCode.Query().Where(
+		redeemcode.UsedByEQ(userID),
+		redeemcode.GroupIDIn(groupIDs...),
+		redeemcode.TypeEQ(RedeemTypeSubscription),
+		redeemcode.StatusEQ(StatusUsed),
+	).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, code := range redeemCodes {
+		if code.GroupID == nil {
+			continue
+		}
+		state := states[*code.GroupID]
+		state.Purchased = true
+		states[*code.GroupID] = state
+	}
 	return states, nil
 }
 
 func (s *PaymentService) getOneTimeSubscriptionState(ctx context.Context, client *dbent.Client, userID, groupID, excludeOrderID int64) (OneTimeSubscriptionState, error) {
+	return getOneTimeSubscriptionState(ctx, client, userID, groupID, excludeOrderID)
+}
+
+func getOneTimeSubscriptionState(ctx context.Context, client *dbent.Client, userID, groupID, excludeOrderID int64) (OneTimeSubscriptionState, error) {
 	query := client.PaymentOrder.Query().Where(
 		paymentorder.UserIDEQ(userID),
 		paymentorder.OrderTypeEQ(payment.OrderTypeSubscription),
@@ -228,6 +250,18 @@ func (s *PaymentService) getOneTimeSubscriptionState(ctx context.Context, client
 		} else {
 			state.Pending = true
 		}
+	}
+	redeemed, err := client.RedeemCode.Query().Where(
+		redeemcode.UsedByEQ(userID),
+		redeemcode.GroupIDEQ(groupID),
+		redeemcode.TypeEQ(RedeemTypeSubscription),
+		redeemcode.StatusEQ(StatusUsed),
+	).Exist(ctx)
+	if err != nil {
+		return OneTimeSubscriptionState{}, err
+	}
+	if redeemed {
+		state.Purchased = true
 	}
 	return state, nil
 }

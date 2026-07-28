@@ -56,7 +56,7 @@ type RedeemCodeRepository interface {
 	Update(ctx context.Context, code *RedeemCode) error
 	BatchUpdate(ctx context.Context, ids []int64, fields RedeemCodeBatchUpdateFields) (int64, error)
 	Delete(ctx context.Context, id int64) error
-	Use(ctx context.Context, id, userID int64) error
+	Use(ctx context.Context, id, userID int64, oneTimeSubscription bool) error
 
 	List(ctx context.Context, params pagination.PaginationParams) ([]RedeemCode, *pagination.PaginationResult, error)
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, codeType, status, search string) ([]RedeemCode, *pagination.PaginationResult, error)
@@ -428,6 +428,11 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 		return nil, unsupportedRedeemTypeError(redeemCode.Type)
 	}
 
+	oneTimeSubscription, err := s.validateOneTimeSubscriptionRedemption(ctx, userID, redeemCode)
+	if err != nil {
+		return nil, err
+	}
+
 	// 获取用户信息
 	_, err = s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -443,10 +448,22 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 
 	// 将事务放入 context，使 repository 方法能够使用同一事务
 	txCtx := dbent.NewTxContext(ctx, tx)
+	if oneTimeSubscription {
+		state, err := getOneTimeSubscriptionState(txCtx, tx.Client(), userID, *redeemCode.GroupID, 0)
+		if err != nil {
+			return nil, fmt.Errorf("check one-time subscription eligibility: %w", err)
+		}
+		if err := validateOneTimeSubscriptionState(state); err != nil {
+			return nil, err
+		}
+	}
 
 	// 【关键】先标记兑换码为已使用，确保并发安全
 	// 利用数据库乐观锁（WHERE status = 'unused'）保证原子性
-	if err := s.redeemRepo.Use(txCtx, redeemCode.ID, userID); err != nil {
+	if err := s.redeemRepo.Use(txCtx, redeemCode.ID, userID, oneTimeSubscription); err != nil {
+		if oneTimeSubscription && dbent.IsConstraintError(err) {
+			return nil, infraerrors.Conflict("ONE_TIME_SUBSCRIPTION_ALREADY_PURCHASED", "this subscription can only be purchased once per user")
+		}
 		if errors.Is(err, ErrRedeemCodeNotFound) || errors.Is(err, ErrRedeemCodeUsed) {
 			return nil, ErrRedeemCodeUsed
 		}
@@ -528,6 +545,32 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	}
 
 	return redeemCode, nil
+}
+
+func (s *RedeemService) validateOneTimeSubscriptionRedemption(ctx context.Context, userID int64, redeemCode *RedeemCode) (bool, error) {
+	if redeemCode.Type != RedeemTypeSubscription || redeemCode.GroupID == nil || redeemCode.ValidityDays < 0 {
+		return false, nil
+	}
+	if s.subscriptionService == nil || s.subscriptionService.groupRepo == nil {
+		return false, errors.New("subscription service is not configured")
+	}
+
+	group, err := s.subscriptionService.groupRepo.GetByID(ctx, *redeemCode.GroupID)
+	if err != nil {
+		return false, fmt.Errorf("group not found: %w", err)
+	}
+	if !group.OneTimeSubscription {
+		return false, nil
+	}
+
+	state, err := getOneTimeSubscriptionState(ctx, s.entClient, userID, *redeemCode.GroupID, 0)
+	if err != nil {
+		return false, fmt.Errorf("check one-time subscription eligibility: %w", err)
+	}
+	if err := validateOneTimeSubscriptionState(state); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // invalidateRedeemCaches 失效兑换相关的缓存

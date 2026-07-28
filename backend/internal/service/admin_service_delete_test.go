@@ -395,7 +395,7 @@ func (s *redeemRepoStub) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *redeemRepoStub) Use(ctx context.Context, id, userID int64) error {
+func (s *redeemRepoStub) Use(ctx context.Context, id, userID int64, oneTimeSubscription bool) error {
 	panic("unexpected Use call")
 }
 

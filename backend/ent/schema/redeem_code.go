@@ -72,6 +72,9 @@ func (RedeemCode) Fields() []ent.Field {
 			Nillable(),
 		field.Int("validity_days").
 			Default(30),
+		field.Bool("one_time_subscription").
+			Default(false).
+			Comment("Snapshot of the subscription group's one-time purchase rule when redeemed"),
 	}
 }
 
@@ -95,5 +98,9 @@ func (RedeemCode) Indexes() []ent.Index {
 		index.Fields("used_by"),
 		index.Fields("group_id"),
 		index.Fields("expires_at"),
+		index.Fields("used_by", "group_id").
+			Unique().
+			StorageKey("idx_redeem_codes_one_time_subscription_used").
+			Annotations(entsql.IndexWhere("one_time_subscription = TRUE AND type = 'subscription' AND status = 'used' AND used_by IS NOT NULL AND group_id IS NOT NULL")),
 	}
 }

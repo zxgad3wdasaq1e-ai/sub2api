@@ -394,7 +394,7 @@ func (s *AuthService) useOAuthRegistrationInvitation(ctx context.Context, invita
 		}
 		return nil
 	}
-	return s.redeemRepo.Use(ctx, invitationID, userID)
+	return s.redeemRepo.Use(ctx, invitationID, userID, false)
 }
 
 func (s *AuthService) updateOAuthRegistrationInvitation(ctx context.Context, code *RedeemCode) error {

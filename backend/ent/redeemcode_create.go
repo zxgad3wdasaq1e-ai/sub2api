@@ -170,6 +170,20 @@ func (_c *RedeemCodeCreate) SetNillableValidityDays(v *int) *RedeemCodeCreate {
 	return _c
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_c *RedeemCodeCreate) SetOneTimeSubscription(v bool) *RedeemCodeCreate {
+	_c.mutation.SetOneTimeSubscription(v)
+	return _c
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableOneTimeSubscription(v *bool) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetOneTimeSubscription(*v)
+	}
+	return _c
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_c *RedeemCodeCreate) SetUserID(id int64) *RedeemCodeCreate {
 	_c.mutation.SetUserID(id)
@@ -249,6 +263,10 @@ func (_c *RedeemCodeCreate) defaults() {
 		v := redeemcode.DefaultValidityDays
 		_c.mutation.SetValidityDays(v)
 	}
+	if _, ok := _c.mutation.OneTimeSubscription(); !ok {
+		v := redeemcode.DefaultOneTimeSubscription
+		_c.mutation.SetOneTimeSubscription(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -285,6 +303,9 @@ func (_c *RedeemCodeCreate) check() error {
 	}
 	if _, ok := _c.mutation.ValidityDays(); !ok {
 		return &ValidationError{Name: "validity_days", err: errors.New(`ent: missing required field "RedeemCode.validity_days"`)}
+	}
+	if _, ok := _c.mutation.OneTimeSubscription(); !ok {
+		return &ValidationError{Name: "one_time_subscription", err: errors.New(`ent: missing required field "RedeemCode.one_time_subscription"`)}
 	}
 	return nil
 }
@@ -348,6 +369,10 @@ func (_c *RedeemCodeCreate) createSpec() (*RedeemCode, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ValidityDays(); ok {
 		_spec.SetField(redeemcode.FieldValidityDays, field.TypeInt, value)
 		_node.ValidityDays = value
+	}
+	if value, ok := _c.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(redeemcode.FieldOneTimeSubscription, field.TypeBool, value)
+		_node.OneTimeSubscription = value
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -597,6 +622,18 @@ func (u *RedeemCodeUpsert) AddValidityDays(v int) *RedeemCodeUpsert {
 	return u
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *RedeemCodeUpsert) SetOneTimeSubscription(v bool) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldOneTimeSubscription, v)
+	return u
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateOneTimeSubscription() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldOneTimeSubscription)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -828,6 +865,20 @@ func (u *RedeemCodeUpsertOne) AddValidityDays(v int) *RedeemCodeUpsertOne {
 func (u *RedeemCodeUpsertOne) UpdateValidityDays() *RedeemCodeUpsertOne {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValidityDays()
+	})
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *RedeemCodeUpsertOne) SetOneTimeSubscription(v bool) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetOneTimeSubscription(v)
+	})
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateOneTimeSubscription() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateOneTimeSubscription()
 	})
 }
 
@@ -1228,6 +1279,20 @@ func (u *RedeemCodeUpsertBulk) AddValidityDays(v int) *RedeemCodeUpsertBulk {
 func (u *RedeemCodeUpsertBulk) UpdateValidityDays() *RedeemCodeUpsertBulk {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValidityDays()
+	})
+}
+
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (u *RedeemCodeUpsertBulk) SetOneTimeSubscription(v bool) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetOneTimeSubscription(v)
+	})
+}
+
+// UpdateOneTimeSubscription sets the "one_time_subscription" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateOneTimeSubscription() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateOneTimeSubscription()
 	})
 }
 

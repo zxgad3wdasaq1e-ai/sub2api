@@ -2062,7 +2062,7 @@ func (stubRedeemCodeRepo) Delete(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
 }
 
-func (stubRedeemCodeRepo) Use(ctx context.Context, id, userID int64) error {
+func (stubRedeemCodeRepo) Use(ctx context.Context, id, userID int64, oneTimeSubscription bool) error {
 	return errors.New("not implemented")
 }
 

@@ -110,6 +110,11 @@ func ValidityDays(v int) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldValidityDays, v))
 }
 
+// OneTimeSubscription applies equality check predicate on the "one_time_subscription" field. It's identical to OneTimeSubscriptionEQ.
+func OneTimeSubscription(v bool) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldOneTimeSubscription, v))
+}
+
 // CodeEQ applies the EQ predicate on the "code" field.
 func CodeEQ(v string) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldCode, v))
@@ -658,6 +663,16 @@ func ValidityDaysLT(v int) predicate.RedeemCode {
 // ValidityDaysLTE applies the LTE predicate on the "validity_days" field.
 func ValidityDaysLTE(v int) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldLTE(FieldValidityDays, v))
+}
+
+// OneTimeSubscriptionEQ applies the EQ predicate on the "one_time_subscription" field.
+func OneTimeSubscriptionEQ(v bool) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldOneTimeSubscription, v))
+}
+
+// OneTimeSubscriptionNEQ applies the NEQ predicate on the "one_time_subscription" field.
+func OneTimeSubscriptionNEQ(v bool) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldOneTimeSubscription, v))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

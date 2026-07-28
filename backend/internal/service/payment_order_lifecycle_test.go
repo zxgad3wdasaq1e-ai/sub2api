@@ -123,7 +123,7 @@ func (r *paymentOrderLifecycleRedeemRepo) Delete(context.Context, int64) error {
 	panic("unexpected call")
 }
 
-func (r *paymentOrderLifecycleRedeemRepo) Use(_ context.Context, id, userID int64) error {
+func (r *paymentOrderLifecycleRedeemRepo) Use(_ context.Context, id, userID int64, oneTimeSubscription bool) error {
 	for code, redeemCode := range r.codesByCode {
 		if redeemCode.ID != id {
 			continue

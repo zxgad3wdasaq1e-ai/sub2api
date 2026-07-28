@@ -214,6 +214,20 @@ func (_u *RedeemCodeUpdate) AddValidityDays(v int) *RedeemCodeUpdate {
 	return _u
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_u *RedeemCodeUpdate) SetOneTimeSubscription(v bool) *RedeemCodeUpdate {
+	_u.mutation.SetOneTimeSubscription(v)
+	return _u
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableOneTimeSubscription(v *bool) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetOneTimeSubscription(*v)
+	}
+	return _u
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_u *RedeemCodeUpdate) SetUserID(id int64) *RedeemCodeUpdate {
 	_u.mutation.SetUserID(id)
@@ -352,6 +366,9 @@ func (_u *RedeemCodeUpdate) sqlSave(ctx context.Context) (_node int, err error) 
 	}
 	if value, ok := _u.mutation.AddedValidityDays(); ok {
 		_spec.AddField(redeemcode.FieldValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(redeemcode.FieldOneTimeSubscription, field.TypeBool, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -615,6 +632,20 @@ func (_u *RedeemCodeUpdateOne) AddValidityDays(v int) *RedeemCodeUpdateOne {
 	return _u
 }
 
+// SetOneTimeSubscription sets the "one_time_subscription" field.
+func (_u *RedeemCodeUpdateOne) SetOneTimeSubscription(v bool) *RedeemCodeUpdateOne {
+	_u.mutation.SetOneTimeSubscription(v)
+	return _u
+}
+
+// SetNillableOneTimeSubscription sets the "one_time_subscription" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableOneTimeSubscription(v *bool) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetOneTimeSubscription(*v)
+	}
+	return _u
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_u *RedeemCodeUpdateOne) SetUserID(id int64) *RedeemCodeUpdateOne {
 	_u.mutation.SetUserID(id)
@@ -783,6 +814,9 @@ func (_u *RedeemCodeUpdateOne) sqlSave(ctx context.Context) (_node *RedeemCode, 
 	}
 	if value, ok := _u.mutation.AddedValidityDays(); ok {
 		_spec.AddField(redeemcode.FieldValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.OneTimeSubscription(); ok {
+		_spec.SetField(redeemcode.FieldOneTimeSubscription, field.TypeBool, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
