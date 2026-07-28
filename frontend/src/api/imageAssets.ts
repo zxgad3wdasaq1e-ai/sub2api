@@ -28,6 +28,14 @@ export async function deleteImageAsset(assetId: string): Promise<void> {
   await apiClient.delete(`/user/image-assets/${encodeURIComponent(assetId)}`)
 }
 
-export const imageAssetsAPI = { list: listImageAssets, delete: deleteImageAsset }
+export async function getImageAssetContent(assetId: string, options?: { signal?: AbortSignal }): Promise<Blob> {
+  const { data } = await apiClient.get<Blob>(`/user/image-assets/${encodeURIComponent(assetId)}/content`, {
+    signal: options?.signal,
+    responseType: 'blob',
+  })
+  return data
+}
+
+export const imageAssetsAPI = { list: listImageAssets, delete: deleteImageAsset, getContent: getImageAssetContent }
 
 export default imageAssetsAPI

@@ -167,6 +167,40 @@ WHERE a.user_id = $1 AND a.asset_id = $2 AND a.deleted_at IS NULL`, userID, asse
 	return asset, nil
 }
 
+func (r *imageAssetRepository) GetImageAssetForAPIKey(ctx context.Context, userID, apiKeyID int64, assetID string) (*service.ImageAsset, error) {
+	if r == nil || r.sql == nil {
+		return nil, errors.New("image asset database is unavailable")
+	}
+	asset := &service.ImageAsset{}
+	err := r.sql.QueryRowContext(ctx, imageAssetSelectSQL+`
+WHERE a.user_id = $1 AND j.api_key_id = $2 AND a.asset_id = $3 AND a.deleted_at IS NULL`, userID, apiKeyID, assetID).Scan(
+		&asset.ID, &asset.TaskID, &asset.UserID, &asset.ImageIndex, &asset.ObjectKey,
+		&asset.ContentType, &asset.ByteSize, &asset.CreatedAt, &asset.ExpiresAt,
+		&asset.Prompt, &asset.Model, &asset.Mode, &asset.Size, &asset.Quality, &asset.OutputFormat)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrImageAssetNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return asset, nil
+}
+
+func (r *imageAssetRepository) ListImageAssetsForTaskOwner(ctx context.Context, userID, apiKeyID int64, taskID string, now time.Time) ([]service.ImageAsset, error) {
+	if r == nil || r.sql == nil {
+		return nil, errors.New("image asset database is unavailable")
+	}
+	rows, err := r.sql.QueryContext(ctx, imageAssetSelectSQL+`
+WHERE a.user_id = $1 AND j.api_key_id = $2 AND a.task_id = $3
+  AND a.deleted_at IS NULL AND a.expires_at > $4
+ORDER BY a.image_index ASC`, userID, apiKeyID, taskID, now)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanImageAssets(rows)
+}
+
 func (r *imageAssetRepository) DeleteImageAssetForUser(ctx context.Context, userID int64, assetID string) error {
 	if r == nil || r.sql == nil {
 		return errors.New("image asset database is unavailable")

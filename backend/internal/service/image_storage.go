@@ -33,6 +33,18 @@ type ImageStorageURLResolver interface {
 	ResolveURL(ctx context.Context, key string) (string, error)
 }
 
+// ImageStorageReader opens an object for streaming through Sub2API. It is
+// optional so existing storage providers remain source compatible.
+type ImageStorageReader interface {
+	Open(ctx context.Context, key string) (body io.ReadCloser, contentType string, contentLength int64, err error)
+}
+
+// ImageStorageHealthChecker verifies that the configured bucket is reachable.
+// It is intentionally optional for custom storage implementations.
+type ImageStorageHealthChecker interface {
+	Check(ctx context.Context) error
+}
+
 // ImageStorageDeleter removes an object from the backing storage.
 type ImageStorageDeleter interface {
 	Delete(ctx context.Context, key string) error
@@ -152,6 +164,18 @@ func (u *ImageResultUploader) ResolveURL(ctx context.Context, key string) (strin
 		return "", errors.New("image storage does not support URL resolution")
 	}
 	return resolver.ResolveURL(ctx, key)
+}
+
+// Open opens an uploaded object for authenticated proxy delivery.
+func (u *ImageResultUploader) Open(ctx context.Context, key string) (io.ReadCloser, string, int64, error) {
+	if u == nil || u.storage == nil {
+		return nil, "", 0, errors.New("image storage is unavailable")
+	}
+	reader, ok := u.storage.(ImageStorageReader)
+	if !ok {
+		return nil, "", 0, errors.New("image storage does not support reading")
+	}
+	return reader.Open(ctx, key)
 }
 
 // Delete removes an uploaded object when the backing storage supports it.

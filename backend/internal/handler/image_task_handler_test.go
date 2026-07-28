@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -142,4 +143,39 @@ func TestAsyncImageHandlerDisabledReturns404(t *testing.T) {
 
 	// No task was created / persisted.
 	require.Empty(t, store.tasks)
+}
+
+func TestRewriteImageTaskAssetURLsUsesSameOriginProxy(t *testing.T) {
+	task := &service.ImageTask{
+		ImageURL: "http://minio.internal/images/imgtask_1-0.png",
+		Result:   json.RawMessage(`{"data":[{"url":"http://minio.internal/images/imgtask_1-0.png"},{"url":"http://minio.internal/images/imgtask_1-1.png"}]}`),
+	}
+
+	rewriteImageTaskAssetURLs(task, []service.ImageAsset{
+		{ID: "imgasset_first", ImageIndex: 0},
+		{ID: "imgasset_second", ImageIndex: 1},
+	}, "/v1/images/tasks/imgtask_1")
+
+	require.Equal(t, "/v1/images/assets/imgasset_first/content", task.ImageURL)
+	require.NotContains(t, string(task.Result), "minio.internal")
+	require.Contains(t, string(task.Result), "/v1/images/assets/imgasset_first/content")
+	require.Contains(t, string(task.Result), "/v1/images/assets/imgasset_second/content")
+}
+
+func TestAsyncImageHandlerStreamAssetContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	h := &AsyncImageHandler{}
+	router.GET("/image", func(c *gin.Context) {
+		h.streamAssetContent(c, &service.ImageAsset{ID: "imgasset_1", ContentType: "image/png", ByteSize: 11}, io.NopCloser(strings.NewReader("image-bytes")))
+	})
+
+	writer := httptest.NewRecorder()
+	router.ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "/image?download=1", nil))
+
+	require.Equal(t, http.StatusOK, writer.Code)
+	require.Equal(t, "image/png", writer.Header().Get("Content-Type"))
+	require.Equal(t, "private, no-store", writer.Header().Get("Cache-Control"))
+	require.Equal(t, "attachment; filename=\"sub2api-imgasset_1.png\"", writer.Header().Get("Content-Disposition"))
+	require.Equal(t, "image-bytes", writer.Body.String())
 }

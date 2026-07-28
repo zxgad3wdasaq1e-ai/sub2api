@@ -217,8 +217,12 @@ func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in Imag
 	if !cfg.IsConfigured() {
 		return ErrImageStorageIncomplete
 	}
-	if _, err := s.factory(ctx, cfg); err != nil {
+	storage, err := s.factory(ctx, cfg)
+	if err != nil {
 		return err
+	}
+	if checker, ok := storage.(ImageStorageHealthChecker); ok {
+		return checker.Check(ctx)
 	}
 	return nil
 }

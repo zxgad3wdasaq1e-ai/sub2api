@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -24,6 +25,8 @@ type S3ImageStorage struct {
 
 var _ service.ImageStorage = (*S3ImageStorage)(nil)
 var _ service.ImageStorageURLResolver = (*S3ImageStorage)(nil)
+var _ service.ImageStorageReader = (*S3ImageStorage)(nil)
+var _ service.ImageStorageHealthChecker = (*S3ImageStorage)(nil)
 var _ service.ImageStorageDeleter = (*S3ImageStorage)(nil)
 
 // NewS3ImageStorage 依据配置构造 S3 图片存储（调用方应先确认 cfg.Active()）。
@@ -85,6 +88,40 @@ func (s *S3ImageStorage) ResolveURL(ctx context.Context, key string) (string, er
 		return "", fmt.Errorf("presign url: %w", err)
 	}
 	return result.URL, nil
+}
+
+// Open reads an object from the configured bucket. Callers own the returned
+// body and must close it after streaming it to the authenticated client.
+func (s *S3ImageStorage) Open(ctx context.Context, key string) (io.ReadCloser, string, int64, error) {
+	finish := servertiming.ObserveDependency(ctx, "s3")
+	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+	})
+	finish()
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("S3 GetObject: %w", err)
+	}
+	contentType := ""
+	if result.ContentType != nil {
+		contentType = strings.TrimSpace(*result.ContentType)
+	}
+	contentLength := int64(-1)
+	if result.ContentLength != nil {
+		contentLength = *result.ContentLength
+	}
+	return result.Body, contentType, contentLength, nil
+}
+
+// Check verifies bucket access for the admin connection test.
+func (s *S3ImageStorage) Check(ctx context.Context) error {
+	finish := servertiming.ObserveDependency(ctx, "s3")
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &s.bucket})
+	finish()
+	if err != nil {
+		return fmt.Errorf("S3 HeadBucket: %w", err)
+	}
+	return nil
 }
 
 // Delete removes an image object from the configured bucket.

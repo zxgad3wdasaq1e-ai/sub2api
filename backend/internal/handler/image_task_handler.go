@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,8 +133,9 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	go h.run(task.ID, platform, taskCtx, recorder, cancel)
 }
 
-// ListAssets returns the current user's durable image library. URLs are
-// generated from object keys at read time and may be cached briefly in Redis.
+// ListAssets returns the current user's durable image library. Object bytes
+// are always served through this application, never from a browser-visible
+// object-storage URL.
 func (h *AsyncImageHandler) ListAssets(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok || subject.UserID <= 0 || h == nil || h.assets == nil {
@@ -144,8 +147,42 @@ func (h *AsyncImageHandler) ListAssets(c *gin.Context) {
 		imageTaskError(c, err)
 		return
 	}
+	for i := range assets {
+		assets[i].URL = imageAssetUserContentURL(assets[i].ID)
+	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"items": assets})
+}
+
+// GetAssetContent streams one current-user asset from internal object storage.
+func (h *AsyncImageHandler) GetAssetContent(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 || h == nil || h.assets == nil {
+		imageTaskError(c, service.ErrImageAssetUnavailable)
+		return
+	}
+	asset, body, err := h.assets.Open(c.Request.Context(), subject.UserID, c.Param("asset_id"))
+	if err != nil {
+		imageTaskError(c, err)
+		return
+	}
+	h.streamAssetContent(c, asset, body)
+}
+
+// GetAssetContentByAPIKey streams one asset owned by the current API key. It
+// lets Images API clients fetch task result URLs without exposing MinIO.
+func (h *AsyncImageHandler) GetAssetContentByAPIKey(c *gin.Context) {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.UserID <= 0 || apiKey.ID <= 0 || h == nil || h.assets == nil {
+		imageTaskError(c, service.ErrImageTaskForbidden)
+		return
+	}
+	asset, body, err := h.assets.OpenForAPIKey(c.Request.Context(), apiKey.UserID, apiKey.ID, c.Param("asset_id"))
+	if err != nil {
+		imageTaskError(c, err)
+		return
+	}
+	h.streamAssetContent(c, asset, body)
 }
 
 // DeleteAsset removes both the object and the current user's metadata record.
@@ -216,6 +253,14 @@ func (h *AsyncImageHandler) Get(c *gin.Context) {
 	if err != nil {
 		imageTaskError(c, err)
 		return
+	}
+	if task.Status == service.ImageTaskStatusCompleted && h.assets != nil {
+		assets, err := h.assets.ListForTaskOwner(c.Request.Context(), apiKey.UserID, apiKey.ID, task.ID)
+		if err != nil {
+			imageTaskError(c, err)
+			return
+		}
+		rewriteImageTaskAssetURLs(task, assets, c.Request.URL.Path)
 	}
 	c.Header("Cache-Control", "no-store")
 	if task.Status == service.ImageTaskStatusProcessing {
@@ -363,6 +408,97 @@ func imageTaskPollURL(submitPath, taskID string) string {
 		return "/v1/images/tasks/" + taskID
 	}
 	return "/images/tasks/" + taskID
+}
+
+func imageAssetUserContentURL(assetID string) string {
+	return "/user/image-assets/" + url.PathEscape(assetID) + "/content"
+}
+
+func imageTaskAssetContentURL(requestPath, assetID string) string {
+	prefix := "/images/assets/"
+	if strings.HasPrefix(requestPath, "/v1/") {
+		prefix = "/v1/images/assets/"
+	}
+	return prefix + url.PathEscape(assetID) + "/content"
+}
+
+func rewriteImageTaskAssetURLs(task *service.ImageTask, assets []service.ImageAsset, requestPath string) {
+	if task == nil || len(assets) == 0 {
+		return
+	}
+	assetURLs := make(map[int]string, len(assets))
+	for _, asset := range assets {
+		assetURLs[asset.ImageIndex] = imageTaskAssetContentURL(requestPath, asset.ID)
+	}
+	if firstURL, ok := assetURLs[assets[0].ImageIndex]; ok {
+		task.ImageURL = firstURL
+	}
+	if !json.Valid(task.Result) {
+		return
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(task.Result, &envelope); err != nil {
+		return
+	}
+	rawData, ok := envelope["data"]
+	if !ok {
+		return
+	}
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(rawData, &items); err != nil {
+		return
+	}
+	for index, item := range items {
+		assetURL, ok := assetURLs[index]
+		if !ok {
+			continue
+		}
+		encodedURL, err := json.Marshal(assetURL)
+		if err != nil {
+			return
+		}
+		item["url"] = encodedURL
+		items[index] = item
+	}
+	encodedItems, err := json.Marshal(items)
+	if err != nil {
+		return
+	}
+	envelope["data"] = encodedItems
+	encodedResult, err := json.Marshal(envelope)
+	if err == nil {
+		task.Result = encodedResult
+	}
+}
+
+func (h *AsyncImageHandler) streamAssetContent(c *gin.Context, asset *service.ImageAsset, body io.ReadCloser) {
+	defer func() { _ = body.Close() }()
+	contentType := strings.TrimSpace(strings.Split(asset.ContentType, ";")[0])
+	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Type", contentType)
+	if asset.ByteSize > 0 {
+		c.Header("Content-Length", strconv.FormatInt(asset.ByteSize, 10))
+	}
+	if c.Query("download") == "1" {
+		extension := "png"
+		switch {
+		case strings.Contains(contentType, "jpeg"):
+			extension = "jpg"
+		case strings.Contains(contentType, "webp"):
+			extension = "webp"
+		case strings.Contains(contentType, "gif"):
+			extension = "gif"
+		}
+		c.Header("Content-Disposition", "attachment; filename=\"sub2api-"+asset.ID+"."+extension+"\"")
+	}
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, body); err != nil {
+		logger.L().Warn("image_asset.proxy_stream_failed", zap.String("asset_id", asset.ID), zap.Error(err))
+	}
 }
 
 func extractImageTaskError(body []byte) json.RawMessage {

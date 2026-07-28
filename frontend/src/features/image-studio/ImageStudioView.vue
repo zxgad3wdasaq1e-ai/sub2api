@@ -290,6 +290,8 @@ const loadingKeys = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const queuePayloads = new Map<string, QueuePayload>()
 const activeJobIds = new Set<string>()
+const imageObjectURLs = new Map<string, string>()
+let imageReloadGeneration = 0
 const ownerUserId = computed(() => {
   const id = authStore.user?.id
   return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null
@@ -607,15 +609,37 @@ async function reloadJobs() {
 
 async function reloadImages() {
   const owner = ownerUserId.value
+  const generation = ++imageReloadGeneration
+  revokeImageObjectURLs()
   if (!owner) {
     images.value = []
     return
   }
   const assets = await imageAssetsAPI.list()
-  if (ownerUserId.value === owner) images.value = assets.map((asset) => studioImageFromAsset(asset, owner))
+  if (ownerUserId.value !== owner || generation !== imageReloadGeneration) return
+  const loadedImages = await Promise.all(assets.map(async (asset) => {
+    try {
+      const blob = await imageAssetsAPI.getContent(asset.id)
+      const remoteUrl = URL.createObjectURL(blob)
+      if (ownerUserId.value !== owner || generation !== imageReloadGeneration) {
+        URL.revokeObjectURL(remoteUrl)
+        return null
+      }
+      imageObjectURLs.set(asset.id, remoteUrl)
+      return studioImageFromAsset(asset, owner, remoteUrl)
+    } catch {
+      // Keep the metadata visible, but never fall back to a direct object-storage URL.
+      return ownerUserId.value === owner && generation === imageReloadGeneration
+        ? studioImageFromAsset(asset, owner)
+        : null
+    }
+  }))
+  if (ownerUserId.value === owner && generation === imageReloadGeneration) {
+    images.value = loadedImages.filter((image): image is StudioImage => image !== null)
+  }
 }
 
-function studioImageFromAsset(asset: ImageAssetDTO, owner: number): StudioImage {
+function studioImageFromAsset(asset: ImageAssetDTO, owner: number, remoteUrl = ''): StudioImage {
   return {
     id: asset.id,
     ownerUserId: owner,
@@ -627,7 +651,7 @@ function studioImageFromAsset(asset: ImageAssetDTO, owner: number): StudioImage 
     outputFormat: asset.output_format || contentTypeFormat(asset.content_type),
     createdAt: Date.parse(asset.created_at),
     expiresAt: Date.parse(asset.expires_at),
-    remoteUrl: asset.url,
+    remoteUrl,
   }
 }
 
@@ -643,12 +667,17 @@ async function removeImage(image: StudioImage) {
   if (!window.confirm('确定删除这张图片吗？删除后无法恢复。')) return
   await imageAssetsAPI.delete(image.id)
   if (ownerUserId.value !== owner) return
+  revokeImageObjectURL(image.id)
   images.value = images.value.filter((item) => item.id !== image.id)
   if (selectedImage.value?.id === image.id) selectedImage.value = null
   appStore.showSuccess('图片已删除')
 }
 
 function downloadImage(image: StudioImage) {
+  if (!imageUrl(image)) {
+    appStore.showError('图片暂时无法读取')
+    return
+  }
   const anchor = document.createElement('a')
   anchor.href = imageUrl(image)
   anchor.download = `sub2api-${image.id}.${image.outputFormat === 'jpeg' ? 'jpg' : image.outputFormat}`
@@ -657,6 +686,18 @@ function downloadImage(image: StudioImage) {
   document.body.append(anchor)
   anchor.click()
   anchor.remove()
+}
+
+function revokeImageObjectURL(id: string) {
+  const objectURL = imageObjectURLs.get(id)
+  if (!objectURL) return
+  URL.revokeObjectURL(objectURL)
+  imageObjectURLs.delete(id)
+}
+
+function revokeImageObjectURLs() {
+  imageObjectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL))
+  imageObjectURLs.clear()
 }
 
 function expiryLabel(expiresAt: number): string {
@@ -679,6 +720,8 @@ watch(ownerUserId, async (nextOwner, previousOwner) => {
   activeJobIds.clear()
   queuePayloads.clear()
   jobs.value = []
+  imageReloadGeneration += 1
+  revokeImageObjectURLs()
   images.value = []
   selectedImage.value = null
   if (!nextOwner) return
@@ -692,5 +735,7 @@ onBeforeUnmount(() => {
   activeJobIds.clear()
   queuePayloads.clear()
   clearReferences()
+  imageReloadGeneration += 1
+  revokeImageObjectURLs()
 })
 </script>

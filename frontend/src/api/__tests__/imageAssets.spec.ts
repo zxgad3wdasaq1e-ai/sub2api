@@ -12,7 +12,7 @@ vi.mock('@/api/client', () => ({
   },
 }))
 
-import { deleteImageAsset, listImageAssets } from '@/api/imageAssets'
+import { deleteImageAsset, getImageAssetContent, listImageAssets } from '@/api/imageAssets'
 
 describe('image assets api', () => {
   beforeEach(() => {
@@ -33,5 +33,16 @@ describe('image assets api', () => {
     await deleteImageAsset('imgasset_1/unsafe')
 
     expect(del).toHaveBeenCalledWith('/user/image-assets/imgasset_1%2Funsafe')
+  })
+
+  it('loads protected image content as a blob', async () => {
+    const blob = new Blob(['image-bytes'], { type: 'image/png' })
+    get.mockResolvedValue({ data: blob })
+
+    await expect(getImageAssetContent('imgasset_1/unsafe')).resolves.toBe(blob)
+    expect(get).toHaveBeenCalledWith('/user/image-assets/imgasset_1%2Funsafe/content', {
+      signal: undefined,
+      responseType: 'blob',
+    })
   })
 })

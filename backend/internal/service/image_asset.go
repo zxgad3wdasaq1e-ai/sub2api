@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -56,7 +57,7 @@ type ImageGenerationJob struct {
 }
 
 // ImageAsset is the durable image-library record. ObjectKey and UserID are
-// internal fields; clients receive a current URL generated at read time.
+// internal fields; handlers expose only authenticated Sub2API proxy URLs.
 type ImageAsset struct {
 	ID           string    `json:"id"`
 	TaskID       string    `json:"task_id"`
@@ -101,6 +102,8 @@ type ImageAssetRepository interface {
 	FailImageGenerationJob(ctx context.Context, taskID, errorMessage string, completedAt time.Time) (int64, error)
 	ListImageAssetsForUser(ctx context.Context, userID int64, now time.Time, limit int) ([]ImageAsset, error)
 	GetImageAssetForUser(ctx context.Context, userID int64, assetID string) (*ImageAsset, error)
+	GetImageAssetForAPIKey(ctx context.Context, userID, apiKeyID int64, assetID string) (*ImageAsset, error)
+	ListImageAssetsForTaskOwner(ctx context.Context, userID, apiKeyID int64, taskID string, now time.Time) ([]ImageAsset, error)
 	DeleteImageAssetForUser(ctx context.Context, userID int64, assetID string) error
 	ListExpiredImageAssets(ctx context.Context, now time.Time, limit int) ([]ImageAsset, error)
 	DeleteImageAssetByID(ctx context.Context, assetID string) error
@@ -188,30 +191,95 @@ func (s *ImageAssetService) List(ctx context.Context, userID int64) ([]ImageAsse
 	}
 	if s.cache != nil {
 		if cached, ok, err := s.cache.Get(ctx, userID); err == nil && ok {
-			return cached, nil
+			return stripImageAssetURLs(cached), nil
 		}
 	}
 	assets, err := s.repo.ListImageAssetsForUser(ctx, userID, time.Now().UTC(), defaultImageAssetListLimit)
 	if err != nil {
 		return nil, ErrImageAssetUnavailable.WithCause(err)
 	}
-	uploader := s.currentUploader()
-	if uploader == nil && len(assets) > 0 {
-		return nil, ErrImageAssetObjectUnavailable
-	}
-	for i := range assets {
-		url, err := uploader.ResolveURL(ctx, assets[i].ObjectKey)
-		if err != nil {
-			return nil, ErrImageAssetObjectUnavailable.WithCause(err)
-		}
-		assets[i].URL = url
-	}
+	assets = stripImageAssetURLs(assets)
 	if s.cache != nil {
 		if err := s.cache.Set(ctx, userID, assets); err != nil {
 			logger.L().Warn("image_asset.cache_set_failed", zap.Int64("user_id", userID), zap.Error(err))
 		}
 	}
 	return assets, nil
+}
+
+// ListForTaskOwner returns generated assets for one task after the caller's
+// user and API key ownership has been verified by the gateway.
+func (s *ImageAssetService) ListForTaskOwner(ctx context.Context, userID, apiKeyID int64, taskID string) ([]ImageAsset, error) {
+	if s == nil || s.repo == nil || userID <= 0 || apiKeyID <= 0 || strings.TrimSpace(taskID) == "" {
+		return nil, ErrImageAssetUnavailable
+	}
+	assets, err := s.repo.ListImageAssetsForTaskOwner(ctx, userID, apiKeyID, strings.TrimSpace(taskID), time.Now().UTC())
+	if err != nil {
+		return nil, ErrImageAssetUnavailable.WithCause(err)
+	}
+	return stripImageAssetURLs(assets), nil
+}
+
+// Open verifies the current user's ownership and streams the asset through
+// the configured object storage. Returned bodies must be closed by callers.
+func (s *ImageAssetService) Open(ctx context.Context, userID int64, assetID string) (*ImageAsset, io.ReadCloser, error) {
+	if s == nil || s.repo == nil || userID <= 0 {
+		return nil, nil, ErrImageAssetUnavailable
+	}
+	asset, err := s.repo.GetImageAssetForUser(ctx, userID, strings.TrimSpace(assetID))
+	if err != nil {
+		return nil, nil, imageAssetLookupError(err)
+	}
+	return s.openAssetObject(ctx, asset)
+}
+
+// OpenForAPIKey verifies both user and API key ownership before streaming an
+// asset for a public Images API caller.
+func (s *ImageAssetService) OpenForAPIKey(ctx context.Context, userID, apiKeyID int64, assetID string) (*ImageAsset, io.ReadCloser, error) {
+	if s == nil || s.repo == nil || userID <= 0 || apiKeyID <= 0 {
+		return nil, nil, ErrImageAssetUnavailable
+	}
+	asset, err := s.repo.GetImageAssetForAPIKey(ctx, userID, apiKeyID, strings.TrimSpace(assetID))
+	if err != nil {
+		return nil, nil, imageAssetLookupError(err)
+	}
+	return s.openAssetObject(ctx, asset)
+}
+
+func (s *ImageAssetService) openAssetObject(ctx context.Context, asset *ImageAsset) (*ImageAsset, io.ReadCloser, error) {
+	if asset == nil || !asset.ExpiresAt.After(time.Now().UTC()) {
+		return nil, nil, ErrImageAssetNotFound
+	}
+	uploader := s.currentUploader()
+	if uploader == nil {
+		return nil, nil, ErrImageAssetObjectUnavailable
+	}
+	body, contentType, contentLength, err := uploader.Open(ctx, asset.ObjectKey)
+	if err != nil {
+		return nil, nil, ErrImageAssetObjectUnavailable.WithCause(err)
+	}
+	copy := *asset
+	if strings.TrimSpace(contentType) != "" {
+		copy.ContentType = contentType
+	}
+	if contentLength >= 0 {
+		copy.ByteSize = contentLength
+	}
+	return &copy, body, nil
+}
+
+func imageAssetLookupError(err error) error {
+	if errors.Is(err, ErrImageAssetNotFound) {
+		return ErrImageAssetNotFound
+	}
+	return ErrImageAssetUnavailable.WithCause(err)
+}
+
+func stripImageAssetURLs(assets []ImageAsset) []ImageAsset {
+	for i := range assets {
+		assets[i].URL = ""
+	}
+	return assets
 }
 
 func (s *ImageAssetService) Delete(ctx context.Context, userID int64, assetID string) error {

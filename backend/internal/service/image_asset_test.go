@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,16 @@ func (r *imageAssetTestRepo) GetImageAssetForUser(_ context.Context, _ int64, _ 
 	}
 	copy := *r.getAsset
 	return &copy, nil
+}
+func (r *imageAssetTestRepo) GetImageAssetForAPIKey(_ context.Context, _ int64, _ int64, _ string) (*ImageAsset, error) {
+	if r.getAsset == nil {
+		return nil, ErrImageAssetNotFound
+	}
+	copy := *r.getAsset
+	return &copy, nil
+}
+func (r *imageAssetTestRepo) ListImageAssetsForTaskOwner(_ context.Context, _ int64, _ int64, _ string, _ time.Time) ([]ImageAsset, error) {
+	return append([]ImageAsset(nil), r.assets...), nil
 }
 func (r *imageAssetTestRepo) DeleteImageAssetForUser(_ context.Context, userID int64, assetID string) error {
 	r.deletedUser, r.deletedID = userID, assetID
@@ -73,6 +85,7 @@ func (c *imageAssetTestCache) Invalidate(_ context.Context, userID int64) error 
 
 type imageAssetTestStorage struct {
 	deleted []string
+	body    string
 }
 
 func (*imageAssetTestStorage) Save(context.Context, string, string, []byte) (string, error) {
@@ -80,6 +93,9 @@ func (*imageAssetTestStorage) Save(context.Context, string, string, []byte) (str
 }
 func (*imageAssetTestStorage) ResolveURL(_ context.Context, key string) (string, error) {
 	return "https://cdn.example.test/" + key, nil
+}
+func (s *imageAssetTestStorage) Open(context.Context, string) (io.ReadCloser, string, int64, error) {
+	return io.NopCloser(strings.NewReader(s.body)), "image/png", int64(len(s.body)), nil
 }
 func (s *imageAssetTestStorage) Delete(_ context.Context, key string) error {
 	s.deleted = append(s.deleted, key)
@@ -94,7 +110,7 @@ func newImageAssetTestService(repo ImageAssetRepository, cache ImageAssetCache, 
 	}
 }
 
-func TestImageAssetServiceListCachesFreshResolvedURLs(t *testing.T) {
+func TestImageAssetServiceListCachesAssetMetadataWithoutStorageURLs(t *testing.T) {
 	repo := &imageAssetTestRepo{assets: []ImageAsset{{
 		ID: "imgasset_1", UserID: 7, ObjectKey: "images/imgtask_1-0.png",
 		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour),
@@ -104,7 +120,7 @@ func TestImageAssetServiceListCachesFreshResolvedURLs(t *testing.T) {
 
 	first, err := svc.List(context.Background(), 7)
 	require.NoError(t, err)
-	require.Equal(t, "https://cdn.example.test/images/imgtask_1-0.png", first[0].URL)
+	require.Empty(t, first[0].URL)
 	require.Equal(t, 1, repo.listCalls)
 	require.Equal(t, 1, cache.sets)
 
@@ -112,6 +128,24 @@ func TestImageAssetServiceListCachesFreshResolvedURLs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first, second)
 	require.Equal(t, 1, repo.listCalls, "second list should come from Redis cache")
+}
+
+func TestImageAssetServiceOpenStreamsOwnedObject(t *testing.T) {
+	storage := &imageAssetTestStorage{body: "image-bytes"}
+	repo := &imageAssetTestRepo{getAsset: &ImageAsset{
+		ID: "imgasset_1", UserID: 7, ObjectKey: "images/imgtask_1-0.png",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}}
+	svc := newImageAssetTestService(repo, nil, storage)
+
+	asset, body, err := svc.Open(context.Background(), 7, "imgasset_1")
+	require.NoError(t, err)
+	defer func() { _ = body.Close() }()
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, "image-bytes", string(data))
+	require.Equal(t, "image/png", asset.ContentType)
+	require.EqualValues(t, len(data), asset.ByteSize)
 }
 
 func TestImageAssetServiceDeleteRemovesObjectAndInvalidatesOwnerCache(t *testing.T) {

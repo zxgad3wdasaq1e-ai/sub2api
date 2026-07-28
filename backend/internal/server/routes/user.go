@@ -40,6 +40,7 @@ func RegisterUserRoutes(
 			user.GET("/api-keys/:id/usage/daily", h.Usage.GetMyAPIKeyDailyUsage)
 			user.GET("/platform-quotas", h.User.GetMyPlatformQuotas)
 			user.GET("/image-assets", h.AsyncImage.ListAssets)
+			user.GET("/image-assets/:asset_id/content", h.AsyncImage.GetAssetContent)
 			user.DELETE("/image-assets/:asset_id", h.AsyncImage.DeleteAsset)
 
 			// 通知邮箱管理
