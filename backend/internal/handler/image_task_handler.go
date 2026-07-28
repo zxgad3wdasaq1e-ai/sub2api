@@ -22,12 +22,13 @@ import (
 
 type AsyncImageHandler struct {
 	tasks   *service.ImageTaskService
+	assets  *service.ImageAssetService
 	openAI  *OpenAIGatewayHandler
 	execute func(platform string, c *gin.Context)
 }
 
-func NewAsyncImageHandler(tasks *service.ImageTaskService, openAI *OpenAIGatewayHandler) *AsyncImageHandler {
-	h := &AsyncImageHandler{tasks: tasks, openAI: openAI}
+func NewAsyncImageHandler(tasks *service.ImageTaskService, assets *service.ImageAssetService, openAI *OpenAIGatewayHandler) *AsyncImageHandler {
+	h := &AsyncImageHandler{tasks: tasks, assets: assets, openAI: openAI}
 	h.execute = h.executeWithGateway
 	return h
 }
@@ -100,8 +101,13 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		return
 	}
 
+	metadata, err := h.taskMetadata(c, platform, body)
+	if err != nil {
+		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 	taskCtx, recorder, cancel := newAsyncImageContext(c, body, h.tasks.ExecutionTimeout())
-	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID})
+	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID}, metadata)
 	if err != nil {
 		cancel()
 		imageTaskError(c, err)
@@ -123,6 +129,37 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	})
 
 	go h.run(task.ID, platform, taskCtx, recorder, cancel)
+}
+
+// ListAssets returns the current user's durable image library. URLs are
+// generated from object keys at read time and may be cached briefly in Redis.
+func (h *AsyncImageHandler) ListAssets(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 || h == nil || h.assets == nil {
+		imageTaskError(c, service.ErrImageAssetUnavailable)
+		return
+	}
+	assets, err := h.assets.List(c.Request.Context(), subject.UserID)
+	if err != nil {
+		imageTaskError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"items": assets})
+}
+
+// DeleteAsset removes both the object and the current user's metadata record.
+func (h *AsyncImageHandler) DeleteAsset(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 || h == nil || h.assets == nil {
+		imageTaskError(c, service.ErrImageAssetUnavailable)
+		return
+	}
+	if err := h.assets.Delete(c.Request.Context(), subject.UserID, c.Param("asset_id")); err != nil {
+		imageTaskError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKey *service.APIKey, platform string, body []byte) bool {
@@ -206,6 +243,40 @@ func (h *AsyncImageHandler) validateRequest(c *gin.Context, platform string, bod
 		return errors.New("streaming image requests cannot be submitted as asynchronous tasks")
 	}
 	return nil
+}
+
+func (h *AsyncImageHandler) taskMetadata(c *gin.Context, platform string, body []byte) (service.ImageTaskMetadata, error) {
+	metadata := service.ImageTaskMetadata{Mode: "text"}
+	if strings.Contains(c.Request.URL.Path, "/edits") {
+		metadata.Mode = "edit"
+	}
+	if platform == service.PlatformGrok {
+		parsed := service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
+		metadata.Prompt = parsed.Prompt
+		metadata.Model = parsed.Model
+		metadata.Size = parsed.Size
+		var options struct {
+			Quality      string `json:"quality"`
+			OutputFormat string `json:"output_format"`
+		}
+		_ = json.Unmarshal(body, &options)
+		metadata.Quality = strings.TrimSpace(options.Quality)
+		metadata.OutputFormat = strings.TrimSpace(options.OutputFormat)
+		return metadata, nil
+	}
+	if h == nil || h.openAI == nil || h.openAI.gatewayService == nil {
+		return metadata, errors.New("image gateway is unavailable")
+	}
+	parsed, err := h.openAI.gatewayService.ParseOpenAIImagesRequest(c, body)
+	if err != nil {
+		return metadata, err
+	}
+	metadata.Prompt = parsed.Prompt
+	metadata.Model = parsed.Model
+	metadata.Size = parsed.Size
+	metadata.Quality = parsed.Quality
+	metadata.OutputFormat = parsed.OutputFormat
+	return metadata, nil
 }
 
 func (h *AsyncImageHandler) executeWithGateway(platform string, c *gin.Context) {

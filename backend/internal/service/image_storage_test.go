@@ -66,6 +66,23 @@ func TestImageResultUploaderRewritesB64JSON(t *testing.T) {
 	require.JSONEq(t, `"a cat"`, string(parsed.Data[0]["revised_prompt"]), "unrelated fields preserved")
 }
 
+func TestImageResultUploaderReturnsDurableObjectDescriptors(t *testing.T) {
+	storage := &fakeImageStorage{}
+	uploader := NewImageResultUploader(storage, "images/", 0, nil)
+	b64 := base64.StdEncoding.EncodeToString(pngBytes)
+
+	_, objects, err := uploader.RewriteWithAssets(context.Background(), "imgtask_descriptor", json.RawMessage(`{"data":[{"b64_json":"`+b64+`"}]}`))
+
+	require.NoError(t, err)
+	require.Equal(t, []StoredImageObject{{
+		Index:       0,
+		ObjectKey:   "images/imgtask_descriptor-0.png",
+		ContentType: "image/png",
+		ByteSize:    int64(len(pngBytes)),
+		URL:         "https://cdn.test/images/imgtask_descriptor-0.png",
+	}}, objects)
+}
+
 func TestImageResultUploaderRewritesURL(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")

@@ -547,8 +547,14 @@ func ProvideImageStorageSettingService(
 // 对象存储是异步图片任务的启用前提：仅当开关打开且凭证齐全时功能才可用，否则整体禁用
 // （handler 返回 404，不创建任务、不写 Redis），从而避免大 base64 结果撑爆 Redis。
 // 启用状态由 settings 服务在运行时解析，因此后台改开关后无需重启即可生效。
-func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSettingService) *ImageTaskService {
-	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
+func ProvideImageTaskService(store ImageTaskStore, settings *ImageStorageSettingService, assets *ImageAssetService) *ImageTaskService {
+	return NewImageTaskServiceWithResolver(store, settings.Resolver(), defaultImageTaskTTL, defaultImageTaskExecutionTimeout, assets)
+}
+
+func ProvideImageAssetCleanupService(assets *ImageAssetService) *ImageAssetCleanupService {
+	svc := NewImageAssetCleanupService(assets)
+	svc.Start()
+	return svc
 }
 
 // ProvideBackupService creates and starts BackupService
@@ -696,7 +702,9 @@ var ProviderSet = wire.NewSet(
 	NewGatewayService,
 	NewOpenAIGatewayService,
 	ProvideImageStorageSettingService,
+	NewImageAssetService,
 	ProvideImageTaskService,
+	ProvideImageAssetCleanupService,
 	ProvideBatchImageModelPricingResolver,
 	NewBatchImagePublicService,
 	NewBatchImageDownloadService,

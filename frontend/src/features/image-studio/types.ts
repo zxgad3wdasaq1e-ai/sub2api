@@ -13,7 +13,6 @@ export interface StudioImage {
   outputFormat: string
   createdAt: number
   expiresAt: number
-  blob?: Blob
   remoteUrl?: string
 }
 

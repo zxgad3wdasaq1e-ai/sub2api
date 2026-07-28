@@ -234,14 +234,15 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { keysAPI } from '@/api/keys'
 import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
+import { imageAssetsAPI, type ImageAssetDTO } from '@/api/imageAssets'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiKey } from '@/types'
-import { getImageTask, submitImageTask, type GatewayImageResult, type GenerateImageOptions } from '@/features/ai/gateway'
+import { getImageTask, submitImageTask, type GenerateImageOptions } from '@/features/ai/gateway'
 import { compatibleApiKeys, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
 import { imageSizeForAspectRatio, isLikelyImageModel, promptWithAspectRatio, referenceImageLimitForModel, type ImageAspectRatio } from './capabilities'
 import { createReactiveImageJob, MAX_BATCH_SIZE, MAX_CONCURRENCY, MAX_QUEUE_SIZE, recoverImageJob, remainingImageQueueCapacity, shouldPersistImageJobFailure } from './queue'
-import { cleanupExpiredStudioImages, cleanupExpiredStudioJobs, deleteStudioImage, loadStudioImages, loadStudioJobs, saveStudioImage, saveStudioJob, STUDIO_RETENTION_MS } from './storage'
+import { cleanupExpiredStudioJobs, loadStudioJobs, saveStudioJob } from './storage'
 import type { ImageJob, ImageJobStatus, ImageMode, StudioImage } from './types'
 
 interface ReferenceDraft {
@@ -289,7 +290,6 @@ const loadingKeys = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const queuePayloads = new Map<string, QueuePayload>()
 const activeJobIds = new Set<string>()
-const objectUrls = new Map<string, string>()
 const ownerUserId = computed(() => {
   const id = authStore.user?.id
   return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null
@@ -482,42 +482,6 @@ function waitForImageTask(signal: AbortSignal): Promise<void> {
   })
 }
 
-async function storeJobResults(job: ImageJob, options: QueuePayload['options'], results: GatewayImageResult[], signal: AbortSignal) {
-  for (const [index, result] of results.entries()) {
-    let blob = result.blob
-    if (!blob && result.url) {
-      try {
-        const response = await fetch(result.url, { signal })
-        if (response.ok) blob = await response.blob()
-      } catch (error: any) {
-        if (error?.name === 'AbortError') throw error
-        // Keep the provider URL when it cannot be cached due to CORS.
-      }
-    }
-    const image: StudioImage = {
-      id: `${job.id}-${index}`,
-      ownerUserId: job.ownerUserId,
-      prompt: options.prompt,
-      model: options.model,
-      mode: options.mode,
-      size: options.size,
-      aspectRatio: job.aspectRatio,
-      quality: options.quality,
-      outputFormat: options.outputFormat,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + STUDIO_RETENTION_MS,
-      blob,
-      remoteUrl: result.url,
-    }
-    await saveStudioImage(job.ownerUserId, image)
-    if (ownerUserId.value === job.ownerUserId) {
-      const existingIndex = images.value.findIndex((item) => item.id === image.id)
-      if (existingIndex >= 0) images.value.splice(existingIndex, 1)
-      images.value.unshift(image)
-    }
-  }
-}
-
 async function runJob(payload: QueuePayload) {
   const { job, options } = payload
   if (ownerUserId.value !== job.ownerUserId) {
@@ -546,10 +510,10 @@ async function runJob(payload: QueuePayload) {
         continue
       }
       if (task.status === 'failed') throw new Error(task.error || '图片生成失败')
-      await storeJobResults(job, options, task.results || [], controller.signal)
       if (controller.signal.aborted || job.status !== 'running') return
       job.status = 'completed'
       await saveStudioJob(job.ownerUserId, job)
+      await reloadImages()
       break
     }
   } catch (error: any) {
@@ -594,13 +558,6 @@ function jobStatusClass(status: ImageJobStatus): string {
 }
 
 function imageUrl(image: StudioImage): string {
-  if (image.blob) {
-    const existing = objectUrls.get(image.id)
-    if (existing) return existing
-    const next = URL.createObjectURL(image.blob)
-    objectUrls.set(image.id, next)
-    return next
-  }
   return image.remoteUrl || ''
 }
 
@@ -654,21 +611,39 @@ async function reloadImages() {
     images.value = []
     return
   }
-  await cleanupExpiredStudioImages(owner)
-  const storedImages = await loadStudioImages(owner)
-  if (ownerUserId.value === owner) images.value = storedImages
+  const assets = await imageAssetsAPI.list()
+  if (ownerUserId.value === owner) images.value = assets.map((asset) => studioImageFromAsset(asset, owner))
+}
+
+function studioImageFromAsset(asset: ImageAssetDTO, owner: number): StudioImage {
+  return {
+    id: asset.id,
+    ownerUserId: owner,
+    prompt: asset.prompt,
+    model: asset.model,
+    mode: asset.mode === 'edit' ? 'edit' : 'text',
+    size: asset.size,
+    quality: asset.quality,
+    outputFormat: asset.output_format || contentTypeFormat(asset.content_type),
+    createdAt: Date.parse(asset.created_at),
+    expiresAt: Date.parse(asset.expires_at),
+    remoteUrl: asset.url,
+  }
+}
+
+function contentTypeFormat(contentType: string): string {
+  if (contentType.includes('jpeg')) return 'jpeg'
+  if (contentType.includes('webp')) return 'webp'
+  return 'png'
 }
 
 async function removeImage(image: StudioImage) {
   const owner = ownerUserId.value
   if (!owner || image.ownerUserId !== owner) return
-  if (!window.confirm('确定从本地图库删除这张图片吗？')) return
-  const deleted = await deleteStudioImage(owner, image.id)
-  if (!deleted || ownerUserId.value !== owner) return
+  if (!window.confirm('确定删除这张图片吗？删除后无法恢复。')) return
+  await imageAssetsAPI.delete(image.id)
+  if (ownerUserId.value !== owner) return
   images.value = images.value.filter((item) => item.id !== image.id)
-  const url = objectUrls.get(image.id)
-  if (url) URL.revokeObjectURL(url)
-  objectUrls.delete(image.id)
   if (selectedImage.value?.id === image.id) selectedImage.value = null
   appStore.showSuccess('图片已删除')
 }
@@ -706,8 +681,6 @@ watch(ownerUserId, async (nextOwner, previousOwner) => {
   jobs.value = []
   images.value = []
   selectedImage.value = null
-  objectUrls.forEach((url) => URL.revokeObjectURL(url))
-  objectUrls.clear()
   if (!nextOwner) return
   await loadKeys()
   if (ownerUserId.value !== nextOwner) return
@@ -719,7 +692,5 @@ onBeforeUnmount(() => {
   activeJobIds.clear()
   queuePayloads.clear()
   clearReferences()
-  objectUrls.forEach((url) => URL.revokeObjectURL(url))
-  objectUrls.clear()
 })
 </script>

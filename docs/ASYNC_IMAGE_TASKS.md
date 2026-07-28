@@ -53,6 +53,23 @@ image_storage:
 
 When a task completes, each generated image is uploaded to the bucket and the result is rewritten to a compact form: `data[].url` points at the stored object (a permanent `public_base_url/key` link, or a time-limited presigned URL) and `b64_json` is removed. Only this small JSON is stored in Redis. If an upload fails, the task is marked `failed` rather than persisting the raw base64.
 
+## Built-in image library
+
+The built-in image studio stores generated image **files** in the same configured S3-compatible object storage. It does not store image bytes, base64, or durable signed URLs in PostgreSQL or Redis.
+
+PostgreSQL tables `image_generation_jobs` and `image_assets` store the task metadata, prompt, owner, object key, MIME type, byte size, and expiry. The object key is the durable reference. A private bucket receives a fresh presigned URL when the library is read; a configured `public_base_url` returns the corresponding public object URL instead.
+
+The authenticated user API exposes the library independently of an API key:
+
+```text
+GET    /api/v1/user/image-assets
+DELETE /api/v1/user/image-assets/{asset_id}
+```
+
+`GET` caches the user library in Redis for five minutes. Completing a task, deleting an image, or background expiry cleanup invalidates that cache. Images are retained for seven days; a worker runs every 30 minutes, deletes expired objects first, then removes their PostgreSQL metadata. This allows the browser to keep IndexedDB only for unfinished task polling and safely rebuild the gallery after refresh, sign-in on another device, or clearing browser data.
+
+Turning off new async submissions does not discard an already configured storage binding: existing library images can still receive new read URLs and expire normally. Removing storage credentials before retention cleanup completes leaves records in place for a later retry rather than deleting metadata and orphaning files.
+
 To support a different vendor beyond the S3-compatible client, implement the `service.ImageStorage` interface (`Save(ctx, key, contentType, data) (url, error)`) and provide it in place of the S3 implementation.
 
 ### Troubleshooting: the endpoints return 404 after enabling

@@ -77,6 +77,7 @@ type ImageStorageResolver func() (uploader *ImageResultUploader, enabled bool)
 
 type ImageTaskService struct {
 	store            ImageTaskStore
+	assets           *ImageAssetService
 	uploader         *ImageResultUploader
 	enabled          bool
 	resolve          ImageStorageResolver
@@ -88,20 +89,24 @@ func NewImageTaskService(store ImageTaskStore) *ImageTaskService {
 	return NewImageTaskServiceWithOptions(store, defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
 }
 
-func NewImageTaskServiceWithOptions(store ImageTaskStore, ttl, executionTimeout time.Duration) *ImageTaskService {
+func NewImageTaskServiceWithOptions(store ImageTaskStore, ttl, executionTimeout time.Duration, assets ...*ImageAssetService) *ImageTaskService {
 	if ttl <= 0 {
 		ttl = defaultImageTaskTTL
 	}
 	if executionTimeout <= 0 {
 		executionTimeout = defaultImageTaskExecutionTimeout
 	}
-	return &ImageTaskService{store: store, ttl: ttl, executionTimeout: executionTimeout}
+	s := &ImageTaskService{store: store, ttl: ttl, executionTimeout: executionTimeout}
+	if len(assets) > 0 {
+		s.assets = assets[0]
+	}
+	return s
 }
 
 // NewImageTaskServiceWithUploader 构造一个已启用的图片任务服务：结果会先经 uploader
 // 转存到对象存储再落 Redis。uploader 为 nil 时不做转存（仅用于测试）。
-func NewImageTaskServiceWithUploader(store ImageTaskStore, uploader *ImageResultUploader, ttl, executionTimeout time.Duration) *ImageTaskService {
-	s := NewImageTaskServiceWithOptions(store, ttl, executionTimeout)
+func NewImageTaskServiceWithUploader(store ImageTaskStore, uploader *ImageResultUploader, ttl, executionTimeout time.Duration, assets ...*ImageAssetService) *ImageTaskService {
+	s := NewImageTaskServiceWithOptions(store, ttl, executionTimeout, assets...)
 	s.uploader = uploader
 	s.enabled = true
 	return s
@@ -109,8 +114,8 @@ func NewImageTaskServiceWithUploader(store ImageTaskStore, uploader *ImageResult
 
 // NewImageTaskServiceWithResolver 构造一个由 resolver 决定启用状态的服务：
 // 开关与凭证来自后台设置，保存后立即生效，无需重启。
-func NewImageTaskServiceWithResolver(store ImageTaskStore, resolve ImageStorageResolver, ttl, executionTimeout time.Duration) *ImageTaskService {
-	s := NewImageTaskServiceWithOptions(store, ttl, executionTimeout)
+func NewImageTaskServiceWithResolver(store ImageTaskStore, resolve ImageStorageResolver, ttl, executionTimeout time.Duration, assets ...*ImageAssetService) *ImageTaskService {
+	s := NewImageTaskServiceWithOptions(store, ttl, executionTimeout, assets...)
 	s.resolve = resolve
 	return s
 }
@@ -150,7 +155,7 @@ func (s *ImageTaskService) ExecutionTimeout() time.Duration {
 	return s.executionTimeout
 }
 
-func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner) (*ImageTask, error) {
+func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner, metadata ...ImageTaskMetadata) (*ImageTask, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrImageTaskUnavailable
 	}
@@ -163,7 +168,19 @@ func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner) (*I
 		CreatedAt: now.Unix(),
 		ExpiresAt: now.Add(s.ttl).Unix(),
 	}
+	if s.assets != nil {
+		var taskMetadata ImageTaskMetadata
+		if len(metadata) > 0 {
+			taskMetadata = metadata[0]
+		}
+		if err := s.assets.CreateJob(ctx, task.ID, owner, taskMetadata, now); err != nil {
+			return nil, ErrImageTaskUnavailable.WithCause(err)
+		}
+	}
 	if err := s.store.Save(ctx, task, s.ttl); err != nil {
+		if s.assets != nil {
+			_ = s.assets.DeleteJob(context.Background(), task.ID)
+		}
 		return nil, ErrImageTaskUnavailable.WithCause(err)
 	}
 	return imageTaskToPublic(task), nil
@@ -191,12 +208,24 @@ func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode i
 	if !json.Valid(result) {
 		return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "upstream returned a non-JSON image response"))
 	}
-	if uploader, _ := s.current(); uploader != nil {
-		rewritten, err := uploader.Rewrite(ctx, id, result)
+	uploader, _ := s.current()
+	if uploader == nil && s.assets != nil {
+		return s.Fail(ctx, id, http.StatusServiceUnavailable, imageTaskErrorJSON("api_error", "image object storage is unavailable"))
+	}
+	if uploader != nil {
+		rewritten, objects, err := uploader.RewriteWithAssets(ctx, id, result)
 		if err != nil {
+			s.deleteStoredObjects(context.Background(), uploader, objects)
 			// 转存失败不回退存 base64，避免大 blob 撑爆 Redis：直接把任务标记为失败。
 			logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.Error(err))
 			return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "failed to store generated image to object storage"))
+		}
+		if s.assets != nil {
+			if err := s.assets.CompleteJob(ctx, id, objects); err != nil {
+				s.deleteStoredObjects(context.Background(), uploader, objects)
+				logger.L().Error("image_task.asset_persist_failed", zap.String("task_id", id), zap.Error(err))
+				return s.Fail(ctx, id, http.StatusInternalServerError, imageTaskErrorJSON("api_error", "failed to persist generated image metadata"))
+			}
 		}
 		result = rewritten
 	}
@@ -207,7 +236,20 @@ func (s *ImageTaskService) Fail(ctx context.Context, id string, statusCode int, 
 	if !json.Valid(taskErr) {
 		taskErr = imageTaskErrorJSON("api_error", "image generation failed")
 	}
+	if s != nil && s.assets != nil {
+		if err := s.assets.FailJob(ctx, id, imageTaskErrorMessage(taskErr)); err != nil {
+			logger.L().Warn("image_task.asset_failure_persist_failed", zap.String("task_id", id), zap.Error(err))
+		}
+	}
 	return s.finish(ctx, id, ImageTaskStatusFailed, statusCode, nil, taskErr)
+}
+
+func (s *ImageTaskService) deleteStoredObjects(ctx context.Context, uploader *ImageResultUploader, objects []StoredImageObject) {
+	for _, object := range objects {
+		if err := uploader.Delete(ctx, object.ObjectKey); err != nil {
+			logger.L().Warn("image_task.rollback_object_failed", zap.String("object_key", object.ObjectKey), zap.Error(err))
+		}
+	}
 }
 
 func (s *ImageTaskService) finish(ctx context.Context, id, status string, statusCode int, result, taskErr json.RawMessage) error {
@@ -272,4 +314,14 @@ func firstImageTaskURL(result json.RawMessage) string {
 func imageTaskErrorJSON(errorType, message string) json.RawMessage {
 	data, _ := json.Marshal(map[string]string{"type": errorType, "message": message})
 	return data
+}
+
+func imageTaskErrorMessage(taskErr json.RawMessage) string {
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(taskErr, &payload) == nil && strings.TrimSpace(payload.Message) != "" {
+		return strings.TrimSpace(payload.Message)
+	}
+	return "image generation failed"
 }
