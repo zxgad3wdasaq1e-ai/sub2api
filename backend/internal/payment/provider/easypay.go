@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"golang.org/x/net/html"
 )
 
 // EasyPay constants.
@@ -201,7 +202,133 @@ func (e *EasyPay) createAPIPayment(ctx context.Context, req payment.CreatePaymen
 	if req.IsMobile && resp.PayURL2 != "" {
 		payURL = resp.PayURL2
 	}
-	return &payment.CreatePaymentResponse{TradeNo: resp.TradeNo, PayURL: payURL, QRCode: resp.QRCode}, nil
+
+	qrCode := strings.TrimSpace(resp.QRCode)
+	// Some EasyPay channels return a hosted checkout URL from mapi.php and
+	// render the actual WeChat QR as a data URI in that page instead of
+	// returning qrcode directly. Resolve that image server-side so the
+	// application can render the QR without navigating users to the hosted
+	// merchant page. Mobile requests retain the hosted URL flow.
+	if qrCode == "" && payment.GetBasePaymentType(req.PaymentType) == payment.TypeWxpay && !req.IsMobile {
+		qrCode = e.fetchHostedQRCode(ctx, payURL)
+		// Keep desktop WeChat payments in the in-app QR flow even when an
+		// upstream installation omits the embedded image. Scanning the URL is
+		// still preferable to opening a popup from the checkout page.
+		if qrCode == "" {
+			qrCode = strings.TrimSpace(payURL)
+		}
+	}
+
+	return &payment.CreatePaymentResponse{TradeNo: resp.TradeNo, PayURL: payURL, QRCode: qrCode}, nil
+}
+
+const maxEasyPayQRCodePageSize = 1 << 20
+
+// fetchHostedQRCode extracts the data-image QR used by EasyPay's hosted
+// checkout. The URL is accepted only when it points at the configured
+// EasyPay host, preventing a provider response from turning this into an
+// arbitrary server-side fetch.
+func (e *EasyPay) fetchHostedQRCode(ctx context.Context, payURL string) string {
+	pageURL, err := url.Parse(strings.TrimSpace(payURL))
+	if err != nil || pageURL.Scheme == "" || pageURL.Host == "" {
+		return ""
+	}
+	if pageURL.Scheme != "http" && pageURL.Scheme != "https" {
+		return ""
+	}
+	baseURL, err := url.Parse(e.apiBase())
+	if err != nil || baseURL.Host == "" || !strings.EqualFold(pageURL.Host, baseURL.Host) || pageURL.Scheme != baseURL.Scheme {
+		return ""
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL.String(), nil)
+	if err != nil {
+		return ""
+	}
+	client := e.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: easypayHTTPTimeout}
+	}
+	clientCopy := *client
+	clientCopy.CheckRedirect = func(redirect *http.Request, via []*http.Request) error {
+		if !strings.EqualFold(redirect.URL.Host, baseURL.Host) || redirect.URL.Scheme != baseURL.Scheme {
+			return http.ErrUseLastResponse
+		}
+		if client.CheckRedirect != nil {
+			return client.CheckRedirect(redirect, via)
+		}
+		return nil
+	}
+	response, err := clientCopy.Do(request)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return ""
+	}
+
+	limited := io.LimitReader(response.Body, maxEasyPayQRCodePageSize+1)
+	body, err := io.ReadAll(limited)
+	if err != nil || len(body) > maxEasyPayQRCodePageSize {
+		return ""
+	}
+	return extractEasyPayQRCode(body)
+}
+
+func extractEasyPayQRCode(body []byte) string {
+	tokenizer := html.NewTokenizer(strings.NewReader(string(body)))
+	fallback := ""
+	for {
+		tokenType := tokenizer.Next()
+		if tokenType == html.ErrorToken {
+			return fallback
+		}
+		if tokenType != html.StartTagToken {
+			continue
+		}
+
+		tag, hasAttribute := tokenizer.TagName()
+		if string(tag) != "img" {
+			continue
+		}
+		var src, marker string
+		for hasAttribute {
+			key, value, more := tokenizer.TagAttr()
+			switch string(key) {
+			case "src":
+				src = strings.TrimSpace(string(value))
+			case "alt", "id", "class":
+				marker += " " + strings.ToLower(strings.TrimSpace(string(value)))
+			}
+			hasAttribute = more
+		}
+		if !isRasterImageDataURI(src) {
+			continue
+		}
+		if strings.Contains(marker, "二维码") || strings.Contains(marker, "qrcode") || strings.Contains(marker, "qr-code") {
+			return src
+		}
+		if fallback == "" {
+			fallback = src
+		}
+	}
+}
+
+func isRasterImageDataURI(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	for _, prefix := range []string{
+		"data:image/png;base64,",
+		"data:image/jpeg;base64,",
+		"data:image/jpg;base64,",
+		"data:image/webp;base64,",
+		"data:image/gif;base64,",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveURLs returns (notifyURL, returnURL) preferring request values,

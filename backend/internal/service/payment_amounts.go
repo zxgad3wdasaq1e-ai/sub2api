@@ -32,6 +32,14 @@ func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
 		InexactFloat64()
 }
 
+func calculateCreditedBalanceWithExchangeRate(paymentAmount, multiplier, exchangeRate float64) float64 {
+	normalizedRate := normalizeSubscriptionUSDToCNYRate(exchangeRate)
+	if normalizedRate == 0 {
+		normalizedRate = 1
+	}
+	return calculateCreditedBalance(paymentAmount, multiplier*normalizedRate)
+}
+
 func calculateGatewayRefundAmount(orderAmount, payAmount, refundAmount float64, currency string) float64 {
 	if orderAmount <= 0 || payAmount <= 0 || refundAmount <= 0 {
 		return 0

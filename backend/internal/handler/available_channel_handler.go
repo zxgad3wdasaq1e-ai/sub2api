@@ -2,6 +2,7 @@ package handler
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -116,6 +117,15 @@ type userAvailableChannel struct {
 	Platforms   []userChannelPlatformSection `json:"platforms"`
 }
 
+// userPricedModel is the compact model-to-group binding used by the built-in
+// AI chat and image studio. It intentionally omits channel identity and prices:
+// callers only need to know which of their bound API keys can route a model.
+type userPricedModel struct {
+	Name      string   `json:"name"`
+	Platforms []string `json:"platforms"`
+	GroupIDs  []int64  `json:"group_ids"`
+}
+
 // List 列出当前用户可见的「可用渠道」。
 // GET /api/v1/channels/available
 func (h *AvailableChannelHandler) List(c *gin.Context) {
@@ -169,6 +179,101 @@ func (h *AvailableChannelHandler) List(c *gin.Context) {
 	}
 
 	response.Success(c, out)
+}
+
+// ListPricedModels returns every priced model reachable through a group the
+// current user may bind. Unlike the available-channels page, this runtime
+// catalog is not controlled by the page visibility feature flag.
+func (h *AvailableChannelHandler) ListPricedModels(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	userGroups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	allowedGroupIDs := make(map[int64]struct{}, len(userGroups))
+	for i := range userGroups {
+		allowedGroupIDs[userGroups[i].ID] = struct{}{}
+	}
+
+	channels, err := h.channelService.ListAvailable(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, buildUserPricedModels(channels, allowedGroupIDs))
+}
+
+type userPricedModelAccumulator struct {
+	name      string
+	platforms map[string]struct{}
+	groupIDs  map[int64]struct{}
+}
+
+func buildUserPricedModels(channels []service.AvailableChannel, allowed map[int64]struct{}) []userPricedModel {
+	models := make(map[string]*userPricedModelAccumulator)
+	for i := range channels {
+		channel := &channels[i]
+		if channel.Status != service.StatusActive {
+			continue
+		}
+		for _, model := range channel.SupportedModels {
+			name := strings.TrimSpace(model.Name)
+			platform := strings.TrimSpace(model.Platform)
+			if name == "" || platform == "" || model.Pricing == nil {
+				continue
+			}
+			matchingGroups := make([]int64, 0, len(channel.Groups))
+			for _, group := range channel.Groups {
+				if _, ok := allowed[group.ID]; !ok || !strings.EqualFold(strings.TrimSpace(group.Platform), platform) {
+					continue
+				}
+				matchingGroups = append(matchingGroups, group.ID)
+			}
+			if len(matchingGroups) == 0 {
+				continue
+			}
+
+			key := strings.ToLower(name)
+			entry := models[key]
+			if entry == nil {
+				entry = &userPricedModelAccumulator{
+					name:      name,
+					platforms: make(map[string]struct{}),
+					groupIDs:  make(map[int64]struct{}),
+				}
+				models[key] = entry
+			}
+			entry.platforms[platform] = struct{}{}
+			for _, groupID := range matchingGroups {
+				entry.groupIDs[groupID] = struct{}{}
+			}
+		}
+	}
+
+	out := make([]userPricedModel, 0, len(models))
+	for _, entry := range models {
+		platforms := make([]string, 0, len(entry.platforms))
+		for platform := range entry.platforms {
+			platforms = append(platforms, platform)
+		}
+		sort.Strings(platforms)
+		groupIDs := make([]int64, 0, len(entry.groupIDs))
+		for groupID := range entry.groupIDs {
+			groupIDs = append(groupIDs, groupID)
+		}
+		sort.Slice(groupIDs, func(i, j int) bool { return groupIDs[i] < groupIDs[j] })
+		out = append(out, userPricedModel{Name: entry.name, Platforms: platforms, GroupIDs: groupIDs})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
 }
 
 // buildPlatformSections 把一个渠道按 visibleGroups 的平台集合拆成有序的 section 列表：

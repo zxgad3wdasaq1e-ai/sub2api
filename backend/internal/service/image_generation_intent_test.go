@@ -419,6 +419,16 @@ func TestCollectOpenAIResponseImageOutputSizesFromImagesAPIData(t *testing.T) {
 	require.Equal(t, []string{"2048x1152", "2048x1152"}, collectOpenAIResponseImageOutputSizesFromJSONBytes(body))
 }
 
+func TestCountOpenAIResponseImageOutputsFromImagesAPIResult(t *testing.T) {
+	body := []byte(`{"data":[{"result":"base64-a"},{"result":"base64-b"}]}`)
+	require.Equal(t, 2, countOpenAIResponseImageOutputsFromJSONBytes(body))
+}
+
+func TestCountOpenAIResponseImageOutputsSkipsFailedResults(t *testing.T) {
+	body := []byte(`{"data":[{"status":"failed","result":"partial-a"},{"status":"completed","result":"base64-b"}],"output":[{"type":"image_generation_call","status":"failed","result":"partial-c"}]}`)
+	require.Equal(t, 1, countOpenAIResponseImageOutputsFromJSONBytes(body))
+}
+
 func TestCollectOpenAIImageOutputSizesFromSSEBody(t *testing.T) {
 	body := "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_1\",\"type\":\"image_generation_call\",\"result\":\"final-a\",\"size\":\"3840x2160\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"id\":\"ig_1\",\"type\":\"image_generation_call\",\"result\":\"final-a\"},{\"id\":\"ig_2\",\"type\":\"image_generation_call\",\"result\":\"final-b\",\"size\":\"1024x1024\"}]}}\n\n" +

@@ -16,12 +16,16 @@
         <template v-if="paymentPhase === 'paying'">
           <PaymentStatusPanel
             :order-id="paymentState.orderId"
+            :amount="paymentState.amount"
+            :pay-amount="paymentState.payAmount"
             :qr-code="paymentState.qrCode"
             :expires-at="paymentState.expiresAt"
             :payment-type="paymentState.paymentType"
             :pay-url="paymentState.payUrl"
             :order-type="paymentState.orderType"
             :currency="paymentState.currency || selectedCurrency"
+            :out-trade-no="paymentState.outTradeNo"
+            :mobile-alipay-deep-link="paymentState.alipayMobilePrecreateDeepLink"
             @done="onPaymentDone"
             @success="onPaymentSuccess"
             @settled="onPaymentSettled"
@@ -44,7 +48,7 @@
             <div class="card p-6">
               <AmountInput
                 v-model="amount"
-                :amounts="[10, 20, 50, 100, 200, 500, 1000, 2000, 5000]"
+                :amounts="[1, 10, 20, 50, 100, 200, 500, 1000, 2000]"
                 :min="globalMinAmount"
                 :max="globalMaxAmount"
               />
@@ -57,28 +61,38 @@
                 @select="selectedMethod = $event"
               />
             </div>
-            <div v-if="validAmount > 0" class="card p-6">
-              <div class="space-y-2 text-sm">
-                <div class="flex justify-between">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.paymentAmount') }}</span>
-                  <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(validAmount) }}</span>
+            <div v-if="validAmount > 0" data-test="recharge-summary" class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-200 dark:bg-white">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-xs font-semibold text-emerald-600">{{ t('payment.estimatedCredited') }}</p>
+                  <p class="mt-1 text-3xl font-bold text-gray-900">{{ formatCreditedAmount(creditedAmount) }}</p>
                 </div>
-                <div v-if="feeRate > 0" class="flex justify-between">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
-                  <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(feeAmount) }}</span>
+                <div class="rounded-lg bg-gray-100 px-3 py-2 text-right">
+                  <p class="text-xs text-gray-500">{{ t('payment.rechargeMultiplier') }}</p>
+                  <p class="mt-0.5 text-lg font-bold text-emerald-700">×{{ effectiveBalanceRechargeMultiplier.toFixed(2) }}</p>
                 </div>
-                <div v-if="feeRate > 0" class="flex justify-between border-t border-gray-200 pt-2 dark:border-dark-600">
-                  <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
-                  <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
-                </div>
-                <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
-                  <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
-                </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
-                  {{ t('payment.rechargeRatePreview', { usd: balanceRechargeMultiplier.toFixed(2) }) }}
-                </p>
               </div>
+              <div class="mt-4 space-y-2 border-t border-gray-200 pt-3 text-sm">
+                <div class="flex justify-between gap-4">
+                  <span class="text-gray-500">{{ t('payment.paymentAmount') }}</span>
+                  <span class="font-medium text-gray-900">{{ formatSelectedPaymentAmount(validAmount) }}</span>
+                </div>
+                <div v-if="feeRate > 0" class="flex justify-between gap-4">
+                  <span class="text-gray-500">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
+                  <span class="font-medium text-gray-900">{{ formatSelectedPaymentAmount(feeAmount) }}</span>
+                </div>
+                <div v-if="feeRate > 0" class="flex justify-between gap-4 border-t border-gray-200 pt-2">
+                  <span class="font-medium text-gray-700">{{ t('payment.actualPay') }}</span>
+                  <span class="font-bold text-gray-900">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
+                </div>
+                <div class="flex justify-between gap-4" :class="{ 'border-t border-gray-200 pt-2': feeRate <= 0 }">
+                  <span class="text-gray-500">{{ t('payment.creditedBalance') }}</span>
+                  <span class="font-medium text-gray-900">{{ formatCreditedAmount(creditedAmount) }}</span>
+                </div>
+              </div>
+              <p data-test="recharge-rate-preview" class="mt-3 border-t border-gray-200 pt-3 text-base font-bold text-gray-900">
+                {{ t('payment.rechargeRatePreview', { usd: effectiveBalanceRechargeMultiplier.toFixed(2) }) }}
+              </p>
             </div>
             <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
@@ -360,6 +374,7 @@ function emptyPaymentState(): PaymentRecoverySnapshot {
     orderType: '',
     paymentMode: '',
     resumeToken: '',
+    alipayMobilePrecreateDeepLink: false,
     createdAt: 0,
   }
 }
@@ -480,12 +495,14 @@ function onPaymentDone() {
   }
 }
 
-function onPaymentSuccess() {
+async function onPaymentSuccess() {
+  const completedPayment = { ...paymentState.value }
   removeRecoverySnapshot()
   authStore.refreshUser()
   if (paymentState.value.orderType === 'subscription') {
     subscriptionStore.fetchActiveSubscriptions(true).catch(() => {})
   }
+  await redirectToPaymentResult(completedPayment)
 }
 
 function onPaymentSettled() {
@@ -517,7 +534,10 @@ const subscriptionUsdToCnyRate = computed(() => {
   const rate = checkout.value.subscription_usd_to_cny_rate
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
-const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
+const effectiveBalanceRechargeMultiplier = computed(() => (
+  balanceRechargeMultiplier.value * (subscriptionUsdToCnyRate.value || 1)
+))
+const creditedAmount = computed(() => Math.round((validAmount.value * effectiveBalanceRechargeMultiplier.value) * 100) / 100)
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {
@@ -593,6 +613,10 @@ function subscriptionPaymentAmountForCurrency(value: number, currency: string): 
 
 function formatSelectedPaymentAmount(value: number): string {
   return formatPaymentAmount(value, selectedCurrency.value, localeCode.value)
+}
+
+function formatCreditedAmount(value: number): string {
+  return formatPaymentAmount(value, 'USD', localeCode.value)
 }
 
 function formatSelectedSubscriptionPaymentAmount(value: number): string {
@@ -775,6 +799,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       isMobile: isMobileDevice(),
       isWechatBrowser: typeof window !== 'undefined' && /MicroMessenger/i.test(window.navigator.userAgent),
       forceQRCode: !!(checkout.value.alipay_force_qrcode && normalizeVisibleMethod(requestType) === 'alipay'),
+      mobilePrecreateDeepLink: checkout.value.alipay_mobile_precreate_deep_link === true,
     })
     if (options.openid) {
       payload.openid = options.openid
@@ -823,6 +848,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       isMobile: isMobileDevice(),
       isWechatBrowser: typeof window !== 'undefined' && /MicroMessenger/i.test(window.navigator.userAgent),
       forceQRCode: !!(checkout.value.alipay_force_qrcode && visibleMethod === 'alipay'),
+      mobilePrecreateDeepLink: checkout.value.alipay_mobile_precreate_deep_link === true,
       stripePopupUrl: stripeRouteUrl,
       stripeRouteUrl,
       airwallexRouteUrl,

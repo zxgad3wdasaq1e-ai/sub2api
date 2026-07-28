@@ -333,6 +333,16 @@ export default {
         saved: 'Upstream rate auto detection settings saved',
         saveFailed: 'Failed to save upstream rate auto detection settings'
       },
+      ollamaCloudUsage: {
+        title: 'Ollama Cloud Usage Refresh',
+        description: 'Periodically refresh official Ollama settings-page usage for individually opted-in accounts. Disabled by default.',
+        enabled: 'Enable global automatic refresh',
+        enabledHint: 'Only accounts with a stored browser session and their own automatic refresh switch enabled are refreshed. Manual refresh remains available.',
+        intervalMinutes: 'Refresh interval (minutes)',
+        intervalHint: 'Range: 15–1440 minutes. Failures use bounded exponential backoff.',
+        saved: 'Ollama Cloud usage refresh settings saved',
+        saveFailed: 'Failed to save Ollama Cloud usage refresh settings'
+      },
       gatewayForwarding: {
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
@@ -557,11 +567,11 @@ export default {
         maxAmount: 'Maximum Amount',
         dailyLimit: 'Daily Limit',
         balanceRechargeMultiplier: 'Balance Recharge Multiplier',
-        balanceRechargeMultiplierHint: 'How many USD balance the user receives for each 1 CNY paid',
+        balanceRechargeMultiplierHint: 'Base credit multiplier; the effective multiplier also includes the USD conversion rate below',
         balanceRechargePreview: 'Preview: 1 CNY = {usd} USD',
-        subscriptionUsdToCnyRate: 'Subscription USD to CNY Rate',
+        subscriptionUsdToCnyRate: 'Recharge / Subscription USD Rate',
         subscriptionUsdToCnyRateHint:
-          'CNY charged per 1 USD of plan price on CNY channels (e.g. 7.15). 0 or empty = disabled, plan price is charged as-is. When enabled, all plan prices must be set in USD',
+          'The effective balance credit multiplier is multiplied by this rate. For CNY payment methods, each 1 USD of plan price is also charged at this CNY rate (for example 7.15). 0 or blank uses 1 for balance crediting and charges subscription prices as-is',
         subscriptionUsdToCnyRateDisabled: 'Disabled (price charged as-is)',
         rechargeFeeRate: 'Recharge Fee Rate',
         rechargeFeeRateHint: 'Percentage of service fee charged on top of recharge amount, 0 means no fee',
@@ -585,6 +595,8 @@ export default {
         cancelRateLimitWindowModeFixed: 'Fixed',
         alipayForceQRCode: 'Force Alipay QR Code',
         alipayForceQRCodeHint: 'When enabled, mobile Alipay users always see a QR code instead of being redirected to the mobile payment page',
+        alipayMobilePrecreateDeepLink: 'Mobile Alipay Precreate Handoff',
+        alipayMobilePrecreateDeepLinkHint: 'Use official Alipay precreate on mobile, open the Alipay app, and show the dynamic QR only if handoff fails. This takes priority over Force Alipay QR Code',
         helpText: 'Help Text',
         helpImageUrl: 'Help Image URL',
         manageProviders: 'Manage Providers',

@@ -219,6 +219,28 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/chat',
+    name: 'Chat',
+    component: () => import('@/features/chat/ChatView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'AI Chat',
+      titleKey: 'nav.aiChat'
+    }
+  },
+  {
+    path: '/image-studio',
+    name: 'ImageStudio',
+    component: () => import('@/features/image-studio/ImageStudioView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'AI Image Studio',
+      titleKey: 'nav.aiImage'
+    }
+  },
+  {
     path: '/usage',
     name: 'Usage',
     component: () => import('@/views/user/UsageView.vue'),
@@ -236,7 +258,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/admin/UsageRankingView.vue'),
     meta: {
       requiresAuth: true,
-      requiresAdmin: false,
+      requiresAdmin: true,
       title: 'Usage Ranking',
       titleKey: 'admin.usageRanking.title',
       descriptionKey: 'admin.usageRanking.description'

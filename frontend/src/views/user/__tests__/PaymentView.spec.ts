@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import PaymentView from '../PaymentView.vue'
+import AmountInput from '@/components/payment/AmountInput.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import type { CheckoutInfoResponse, MethodLimit, SubscriptionPlan } from '@/types/payment'
@@ -235,6 +236,93 @@ async function mountSubscriptionConfirm(options: Parameters<typeof checkoutInfoW
   await flushPromises()
   return wrapper
 }
+
+async function mountRecharge(checkout: Partial<CheckoutInfoResponse> = {}) {
+  vi.useRealTimers()
+  routeState.path = '/purchase'
+  routeState.query = {}
+  routerReplace.mockReset().mockResolvedValue(undefined)
+  routerPush.mockReset().mockResolvedValue(undefined)
+  routerResolve.mockClear()
+  createOrder.mockReset()
+  refreshUser.mockReset()
+  fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+  showError.mockReset()
+  showInfo.mockReset()
+  showWarning.mockReset()
+  getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture(checkout))
+  bridgeInvoke.mockReset()
+  window.localStorage.clear()
+  ;(window as Window & { WeixinJSBridge?: { invoke: typeof bridgeInvoke } }).WeixinJSBridge = undefined
+
+  const wrapper = shallowMount(PaymentView, {
+    global: {
+      stubs: {
+        AppLayout: {
+          template: '<div><slot /></div>',
+        },
+        Teleport: true,
+        Transition: false,
+      },
+    },
+  })
+  await flushPromises()
+  return wrapper
+}
+
+describe('PaymentView recharge estimate', () => {
+  it('offers the one-yuan shortcut and removes the five-thousand-yuan shortcut', async () => {
+    const wrapper = await mountRecharge()
+
+    expect(wrapper.findComponent(AmountInput).props('amounts')).toEqual([1, 10, 20, 50, 100, 200, 500, 1000, 2000])
+  })
+
+  it('shows the payment amount, credited balance, and multiplier in a white summary', async () => {
+    const wrapper = await mountRecharge({
+      balance_recharge_multiplier: 3.33,
+      methods: {
+        wxpay: {
+          ...checkoutInfoFixture().data.methods.wxpay,
+          currency: 'CNY',
+        },
+      },
+    })
+
+    wrapper.findComponent(AmountInput).vm.$emit('update:modelValue', 1)
+    await wrapper.vm.$nextTick()
+
+    const summary = wrapper.get('[data-test="recharge-summary"]')
+    expect(summary.classes()).toContain('bg-white')
+    expect(summary.classes()).toContain('dark:bg-white')
+    expect(summary.text()).toContain('payment.estimatedCredited')
+    expect(summary.text()).toContain('payment.paymentAmount')
+    expect(summary.text()).toContain('payment.creditedBalance')
+    expect(summary.text()).toContain(formatPaymentAmount(1, 'CNY'))
+    expect(summary.text()).toContain(formatPaymentAmount(3.33, 'USD'))
+    expect(summary.text()).toContain('×3.33')
+    expect(summary.get('[data-test="recharge-rate-preview"]').classes()).toEqual(expect.arrayContaining(['text-base', 'font-bold']))
+  })
+
+  it('multiplies the recharge multiplier by the configured USD to CNY rate', async () => {
+    const wrapper = await mountRecharge({
+      balance_recharge_multiplier: 3,
+      subscription_usd_to_cny_rate: 7,
+      methods: {
+        wxpay: {
+          ...checkoutInfoFixture().data.methods.wxpay,
+          currency: 'CNY',
+        },
+      },
+    })
+
+    wrapper.findComponent(AmountInput).vm.$emit('update:modelValue', 1)
+    await wrapper.vm.$nextTick()
+
+    const summary = wrapper.get('[data-test="recharge-summary"]')
+    expect(summary.text()).toContain(formatPaymentAmount(21, 'USD'))
+    expect(summary.text()).toContain('×21.00')
+  })
+})
 
 describe('PaymentView subscription confirmation amounts', () => {
   it('shows converted CNY pay amount using the subscription rate, not the balance multiplier', async () => {

@@ -153,6 +153,8 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    aiChat: 'AI Chat',
+    aiImage: 'AI Image Studio',
     batchImage: 'Batch Images',
     usage: 'Usage',
     redeem: 'Redeem',

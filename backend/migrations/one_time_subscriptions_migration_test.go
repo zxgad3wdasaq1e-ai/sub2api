@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMigration185AddsOneTimeSubscriptionGuards(t *testing.T) {
-	content, err := FS.ReadFile("185_one_time_subscriptions.sql")
+func TestMigration190AddsOneTimeSubscriptionGuards(t *testing.T) {
+	content, err := FS.ReadFile("190_one_time_subscriptions.sql")
 	require.NoError(t, err)
 
 	sql := string(content)
