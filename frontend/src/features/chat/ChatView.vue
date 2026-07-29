@@ -264,7 +264,6 @@ const modelBindingMessage = computed(() => selectedApiKey.value
 const filteredConversations = computed(() => {
   const query = conversationQuery.value.trim().toLowerCase()
   return [...conversations.value]
-    .filter((conversation) => conversation.messages.length > 0)
     .filter((conversation) => !query || conversation.title.toLowerCase().includes(query))
     .sort((a, b) => b.updatedAt - a.updatedAt)
 })
