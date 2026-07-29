@@ -71,6 +71,17 @@ type ImageResultUploader struct {
 	maxDownloadBytes int64
 }
 
+// SaveObject stores bytes that were uploaded by an authenticated application
+// endpoint. It deliberately exposes no provider URL; callers persist the
+// object key and resolve content through an authenticated proxy.
+func (u *ImageResultUploader) SaveObject(ctx context.Context, key, contentType string, data []byte) error {
+	if u == nil || u.storage == nil {
+		return errors.New("image storage is unavailable")
+	}
+	_, err := u.storage.Save(ctx, key, contentType, data)
+	return err
+}
+
 // NewImageResultUploader 构造一个 uploader；storage 为 nil 时 Rewrite 直接透传。
 func NewImageResultUploader(storage ImageStorage, prefix string, maxDownloadBytes int64, httpClient *http.Client) *ImageResultUploader {
 	if httpClient == nil {

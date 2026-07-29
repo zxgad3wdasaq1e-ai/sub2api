@@ -67,6 +67,23 @@ func RegisterUserRoutes(
 		}
 
 		// API Key管理
+		chat := authenticated.Group("/chat")
+		{
+			chat.GET("/keys", h.Chat.ListKeyOptions)
+			chat.GET("/conversations", h.Chat.ListConversations)
+			chat.POST("/conversations", h.Chat.CreateConversation)
+			chat.GET("/conversations/:conversation_id", h.Chat.GetConversation)
+			chat.DELETE("/conversations/:conversation_id", h.Chat.DeleteConversation)
+			chat.GET("/conversations/:conversation_id/messages", h.Chat.GetMessages)
+			chat.POST("/conversations/:conversation_id/runs", h.Chat.CreateRun)
+			chat.GET("/runs/:run_id", h.Chat.GetRun)
+			chat.GET("/runs/:run_id/events", h.Chat.GetRunEvents)
+			chat.POST("/runs/:run_id/cancel", h.Chat.CancelRun)
+			chat.POST("/attachments", h.Chat.UploadAttachment)
+			chat.GET("/attachments/:attachment_id/content", h.Chat.GetAttachmentContent)
+			chat.DELETE("/attachments/:attachment_id", h.Chat.DeleteAttachment)
+		}
+
 		keys := authenticated.Group("/keys")
 		{
 			keys.GET("", h.APIKey.List)

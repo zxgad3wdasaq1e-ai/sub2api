@@ -96,6 +96,10 @@
           <SaveToggle :label="t('admin.promptAudit.saveBar.enabled')" :model-value="draft.enabled" data-test="enabled-toggle" @update:model-value="setEnabled" />
           <SaveToggle :label="t('admin.promptAudit.saveBar.blocking')" :model-value="draft.blocking_enabled" :disabled="!draft.enabled" data-test="blocking-toggle" @update:model-value="setBlocking" />
           <SaveToggle :label="t('admin.promptAudit.saveBar.storePass')" :model-value="draft.store_pass_events" data-test="store-pass-toggle" @update:model-value="replaceDraft({ ...draft!, store_pass_events: $event })" />
+          <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-dark-200">
+            <input class="h-4 w-4 accent-primary-600" type="checkbox" :checked="Boolean(draft.store_full_prompt)" data-test="store-full-prompt-toggle" @change="replaceDraft({ ...draft!, store_full_prompt: ($event.target as HTMLInputElement).checked })" />
+            {{ t('admin.promptAudit.saveBar.storeFullPrompt') }}
+          </label>
         </div>
         <div class="flex items-center gap-3">
           <span class="text-sm" :class="dirty ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-dark-400'">

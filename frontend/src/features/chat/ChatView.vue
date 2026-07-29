@@ -105,7 +105,7 @@
               </div>
               <div class="min-w-0" :class="message.role === 'user' ? 'max-w-[85%]' : 'max-w-[calc(100%-2.75rem)] flex-1'">
                 <div v-if="message.attachments?.length" class="mb-2 flex flex-wrap justify-end gap-2">
-                  <img v-for="attachment in message.attachments" :key="attachment.id" :src="attachment.dataUrl" :alt="attachment.name" class="h-28 w-28 rounded-md border border-gray-200 object-cover dark:border-dark-700" />
+                  <img v-for="attachment in message.attachments" v-show="attachment.previewUrl" :key="attachment.id" :src="attachment.previewUrl" :alt="attachment.name" class="h-28 w-28 rounded-md border border-gray-200 object-cover dark:border-dark-700" />
                 </div>
                 <div
                   v-if="message.role === 'user'"
@@ -130,7 +130,7 @@
           <div class="mx-auto max-w-3xl">
             <div v-if="attachments.length" class="mb-2 flex gap-2 overflow-x-auto pb-1">
               <div v-for="attachment in attachments" :key="attachment.id" class="relative flex-shrink-0">
-                <img :src="attachment.dataUrl" :alt="attachment.name" class="h-16 w-16 rounded-md border border-gray-200 object-cover dark:border-dark-700" />
+                <img :src="attachment.previewUrl" :alt="attachment.name" class="h-16 w-16 rounded-md border border-gray-200 object-cover dark:border-dark-700" />
                 <button type="button" class="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-900 text-white" :title="`移除 ${attachment.name}`" @click="removeAttachment(attachment.id)">
                   <Icon name="x" size="xs" />
                 </button>
@@ -186,18 +186,19 @@ import { marked } from 'marked'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { keysAPI } from '@/api/keys'
 import { userChannelsAPI, type UserPricedModel } from '@/api/channels'
+import { chatAPI, type ChatMessageDTO } from '@/api/chat'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import type { ApiKey } from '@/types'
-import { streamChatCompletion, type ChatCompletionMessage } from '@/features/ai/gateway'
 import { compatibleApiKeys, findPricedModel, selectCompatibleApiKey } from '@/features/ai/modelCatalog'
 import { loadChatPreferences, loadConversations, saveChatPreferences, saveConversations } from './storage'
 import type { ChatAttachment, ChatMessage, ChatPreferences, Conversation } from './types'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const preferences = ref<ChatPreferences>(loadChatPreferences())
-const conversations = ref<Conversation[]>(loadConversations())
+const conversations = ref<Conversation[]>(loadConversations(authStore.user?.id))
 const activeId = ref('')
 const apiKeys = ref<ApiKey[]>([])
 const models = ref<UserPricedModel[]>([])
@@ -208,10 +209,13 @@ const settingsOpen = ref(false)
 const conversationQuery = ref('')
 const draft = ref('')
 const attachments = ref<ChatAttachment[]>([])
+const serverReady = ref(false)
+const uploadingAttachment = ref(false)
 const messagesElement = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 let abortController: AbortController | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+const attachmentObjectUrls = new Set<string>()
 
 const starterPrompts = ['总结这段内容的关键结论', '帮我设计一个可执行的方案', '分析图片中的信息']
 
@@ -280,12 +284,12 @@ const conversationGroups = computed(() => {
   return groups.filter((group) => group.items.length)
 })
 const canSend = computed(() => Boolean(
-  selectedApiKey.value && currentModel.value.trim() && (draft.value.trim() || attachments.value.length),
+  serverReady.value && selectedApiKey.value && currentModel.value.trim() && !uploadingAttachment.value && (draft.value.trim() || attachments.value.length),
 ))
 
 watch(conversations, () => {
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => saveConversations(conversations.value), 200)
+  saveTimer = setTimeout(() => saveConversations(conversations.value, authStore.user?.id), 200)
 }, { deep: true })
 
 watch(() => preferences.value.apiKeyId, () => {
@@ -308,37 +312,46 @@ async function scrollToBottom() {
 
 function newConversation() {
   if (busy.value) stopGeneration()
-  const current = currentConversation.value
-  if (current && !current.messages.length) {
-    current.model = preferences.value.defaultModel
-  } else {
-    const conversation = createConversation()
-    conversations.value.push(conversation)
-    activeId.value = conversation.id
-  }
-  mobileOpen.value = false
-  void scrollToBottom()
+  void (async () => {
+    try {
+      const created = await chatAPI.create({ model: preferences.value.defaultModel, system_prompt: preferences.value.systemPrompt })
+      conversations.value.unshift({ id: created.id, title: created.title, model: created.model || preferences.value.defaultModel, messages: [], createdAt: Date.parse(created.created_at), updatedAt: Date.parse(created.updated_at) })
+      activeId.value = created.id
+      mobileOpen.value = false
+      void scrollToBottom()
+    } catch (error: any) {
+      appStore.showError(error?.message || '创建会话失败')
+    }
+  })()
 }
 
 function selectConversation(id: string) {
   if (busy.value) stopGeneration()
   activeId.value = id
   mobileOpen.value = false
+  void refreshConversation(id)
   void scrollToBottom()
 }
 
 function removeConversation(id: string) {
   if (!window.confirm('确定删除这个对话吗？')) return
   if (busy.value && id === activeId.value) stopGeneration()
-  conversations.value = conversations.value.filter((conversation) => conversation.id !== id)
-  ensureActiveConversation()
+  void (async () => {
+    try {
+      await chatAPI.remove(id)
+      conversations.value = conversations.value.filter((conversation) => conversation.id !== id)
+      ensureActiveConversation()
+    } catch (error: any) {
+      appStore.showError(error?.message || '删除会话失败')
+    }
+  })()
 }
 
 async function loadKeys() {
   loadingKeys.value = true
   try {
-    const response = await keysAPI.list(1, 100, { status: 'active', sort_by: 'created_at', sort_order: 'desc' })
-    apiKeys.value = response.items || []
+    const options = await chatAPI.keys()
+    apiKeys.value = options.map((item) => ({ id: item.id, name: item.name, group_id: item.group_id, status: item.status, key: '' } as ApiKey))
     await loadModels()
   } catch (error: any) {
     appStore.showError(error?.message || '读取 API 密钥失败')
@@ -360,19 +373,74 @@ async function loadModels() {
   }
 }
 
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error || new Error('读取图片失败'))
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.readAsDataURL(file)
-  })
+function messageFromDTO(message: ChatMessageDTO): ChatMessage {
+  const text = (message.parts || []).filter((part) => part.type === 'text').map((part) => part.text || '').join('')
+  const attachments = (message.parts || []).filter((part) => part.type === 'image' && part.attachment_id).map((part) => ({
+    id: part.attachment_id as string,
+    attachmentId: part.attachment_id as string,
+    name: part.name || 'image',
+    contentType: part.content_type || 'image/*',
+    byteSize: part.byte_size || 0,
+    previewUrl: '',
+  }))
+  return { id: message.id, role: message.role === 'system' ? 'assistant' : message.role, content: text, attachments: attachments.length ? attachments : undefined, createdAt: Date.parse(message.created_at), pending: message.status === 'pending', error: message.status === 'failed' || message.status === 'cancelled', status: message.status }
+}
+
+async function refreshConversation(id: string) {
+  try {
+    const payload = await chatAPI.get(id)
+    const conversation = conversations.value.find((item) => item.id === id)
+    if (!conversation) return
+    conversation.title = payload.conversation.title
+    conversation.model = payload.conversation.model || conversation.model
+    conversation.createdAt = Date.parse(payload.conversation.created_at)
+    conversation.updatedAt = Date.parse(payload.conversation.updated_at)
+    conversation.messages.flatMap((message) => message.attachments || []).forEach((attachment) => {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl)
+        attachmentObjectUrls.delete(attachment.previewUrl)
+      }
+    })
+    conversation.messages = payload.messages.filter((message) => message.role !== 'system').map(messageFromDTO)
+    await hydrateAttachmentPreviews(conversation.messages)
+  } catch (error: any) {
+    appStore.showError(error?.message || '读取会话失败')
+  }
+}
+
+async function hydrateAttachmentPreviews(messages: ChatMessage[]) {
+  const attachments = messages.flatMap((message) => message.attachments || []).filter((attachment) => !attachment.previewUrl)
+  await Promise.all(attachments.map(async (attachment) => {
+    try {
+      const url = URL.createObjectURL(await chatAPI.getAttachmentContent(attachment.attachmentId))
+      attachmentObjectUrls.add(url)
+      attachment.previewUrl = url
+    } catch { /* message metadata remains available when preview loading fails */ }
+  }))
+}
+
+async function loadServerConversations() {
+  try {
+    const items = await chatAPI.list()
+    conversations.value = items.map((item) => ({ id: item.id, title: item.title, model: item.model || preferences.value.defaultModel, messages: [], createdAt: Date.parse(item.created_at), updatedAt: Date.parse(item.updated_at) }))
+    if (!conversations.value.length) {
+      const created = await chatAPI.create({ model: preferences.value.defaultModel, system_prompt: preferences.value.systemPrompt })
+      conversations.value = [{ id: created.id, title: created.title, model: created.model || preferences.value.defaultModel, messages: [], createdAt: Date.parse(created.created_at), updatedAt: Date.parse(created.updated_at) }]
+    }
+    activeId.value = conversations.value[0].id
+    await refreshConversation(activeId.value)
+    serverReady.value = true
+  } catch (error: any) {
+    serverReady.value = false
+    appStore.showError(error?.message || '读取服务端会话失败')
+  }
 }
 
 async function handleFiles(event: Event) {
   const input = event.target as HTMLInputElement
   const files = [...(input.files || [])]
   input.value = ''
+  uploadingAttachment.value = true
   for (const file of files) {
     if (attachments.value.length >= 4) {
       appStore.showError('每条消息最多添加 4 张图片')
@@ -382,12 +450,26 @@ async function handleFiles(event: Event) {
       appStore.showError(`${file.name} 必须是 10 MB 以内的 PNG、JPEG 或 WebP 图片`)
       continue
     }
-    attachments.value.push({ id: crypto.randomUUID(), name: file.name, dataUrl: await readFile(file) })
+    try {
+      const uploaded = await chatAPI.uploadAttachment(file)
+      const previewUrl = URL.createObjectURL(file)
+      attachmentObjectUrls.add(previewUrl)
+      attachments.value.push({ id: uploaded.id, attachmentId: uploaded.id, name: uploaded.name, contentType: uploaded.content_type, byteSize: uploaded.byte_size, previewUrl })
+    } catch (error: any) {
+      appStore.showError(error?.message || `${file.name} 上传失败`)
+    }
   }
+  uploadingAttachment.value = false
 }
 
 function removeAttachment(id: string) {
+  const removed = attachments.value.find((attachment) => attachment.id === id)
   attachments.value = attachments.value.filter((attachment) => attachment.id !== id)
+  if (removed?.previewUrl) {
+    URL.revokeObjectURL(removed.previewUrl)
+    attachmentObjectUrls.delete(removed.previewUrl)
+  }
+  void chatAPI.removeAttachment?.(id)
 }
 
 async function sendMessage() {
@@ -418,23 +500,15 @@ async function sendMessage() {
   abortController = new AbortController()
   void scrollToBottom()
 
-  const requestMessages: ChatCompletionMessage[] = conversation.messages
-    .filter((message) => message.id !== assistantMessage.id)
-    .map((message) => ({
-      role: message.role,
-      content: message.content,
-      attachments: message.attachments?.map((attachment) => ({ dataUrl: attachment.dataUrl })),
-    }))
-  if (preferences.value.systemPrompt.trim()) {
-    requestMessages.unshift({ role: 'system' as const, content: preferences.value.systemPrompt.trim() })
-  }
-
   try {
-    await streamChatCompletion({
-      apiKey: selectedApiKey.value.key,
+    await chatAPI.streamRun({
+      conversationId: conversation.id,
+      content: text,
       model: currentModel.value,
-      messages: requestMessages,
+      systemPrompt: preferences.value.systemPrompt,
+      apiKeyId: selectedApiKey.value.id,
       temperature: preferences.value.temperature,
+      attachments: sentAttachments.map((attachment) => ({ attachment_id: attachment.attachmentId })),
       signal: abortController.signal,
       onDelta: (delta) => {
         assistantMessage.content += delta
@@ -442,6 +516,7 @@ async function sendMessage() {
       },
     })
     if (!assistantMessage.content) throw new Error('模型未返回文本内容')
+    await refreshConversation(conversation.id)
   } catch (error: any) {
     if (error?.name !== 'AbortError') {
       assistantMessage.error = true
@@ -477,13 +552,16 @@ function saveSettings() {
 
 onMounted(() => {
   void loadKeys()
+  void loadServerConversations()
   void scrollToBottom()
 })
 
 onBeforeUnmount(() => {
   abortController?.abort()
   if (saveTimer) clearTimeout(saveTimer)
-  saveConversations(conversations.value)
+  saveConversations(conversations.value, authStore.user?.id)
+  attachmentObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  attachmentObjectUrls.clear()
 })
 </script>
 

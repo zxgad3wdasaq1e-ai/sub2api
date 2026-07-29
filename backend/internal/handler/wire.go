@@ -144,6 +144,15 @@ func ProvideBatchImageHandler(
 	return h
 }
 
+func ProvideChatHandler(
+	chatService *service.ChatService,
+	openAIGatewayHandler *OpenAIGatewayHandler,
+	gatewayHandler *GatewayHandler,
+	subscriptionService *service.SubscriptionService,
+) *ChatHandler {
+	return NewChatHandler(chatService, openAIGatewayHandler, gatewayHandler, subscriptionService)
+}
+
 // ProvideSystemHandler creates admin.SystemHandler with UpdateService
 func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService) *admin.SystemHandler {
 	return admin.NewSystemHandler(updateService, lockService)
@@ -184,6 +193,7 @@ func ProvideHandlers(
 	availableChannelHandler *AvailableChannelHandler,
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
+	chatHandler *ChatHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -206,6 +216,7 @@ func ProvideHandlers(
 		AvailableChannel: availableChannelHandler,
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
+		Chat:             chatHandler,
 	}
 }
 
@@ -229,6 +240,7 @@ var ProviderSet = wire.NewSet(
 	NewAvailableChannelHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
+	ProvideChatHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,

@@ -1,6 +1,6 @@
 import type { ChatPreferences, Conversation } from './types'
 
-const CONVERSATIONS_KEY = 'sub2api_chat_conversations_v1'
+const CONVERSATIONS_KEY = 'sub2api_chat_conversations_v2'
 const PREFERENCES_KEY = 'sub2api_chat_preferences_v1'
 
 export const defaultChatPreferences: ChatPreferences = {
@@ -10,28 +10,39 @@ export const defaultChatPreferences: ChatPreferences = {
   temperature: 0.7,
 }
 
-export function loadConversations(): Conversation[] {
+function conversationCacheKey(userId?: number | string | null): string {
+  return `${CONVERSATIONS_KEY}:${String(userId || 'anonymous')}`
+}
+
+export function loadConversations(userId?: number | string | null): Conversation[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(CONVERSATIONS_KEY) || '[]')
-    return Array.isArray(parsed) ? parsed : []
+    const parsed = JSON.parse(localStorage.getItem(conversationCacheKey(userId)) || '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((conversation) => ({
+      ...conversation,
+      messages: Array.isArray(conversation.messages) ? conversation.messages.map((message: any) => ({
+        ...message,
+        attachments: Array.isArray(message.attachments) ? message.attachments.filter((attachment: any) => !attachment.dataUrl) : undefined,
+      })) : [],
+    }))
   } catch {
     return []
   }
 }
 
-export function saveConversations(conversations: Conversation[]): void {
+export function saveConversations(conversations: Conversation[], userId?: number | string | null): void {
   const recent = [...conversations]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 80)
   try {
-    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(recent))
+    localStorage.setItem(conversationCacheKey(userId), JSON.stringify(recent))
   } catch {
     const textOnly = recent.map((conversation) => ({
       ...conversation,
       messages: conversation.messages.map((message) => ({ ...message, attachments: undefined })),
     }))
     try {
-      localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(textOnly))
+      localStorage.setItem(conversationCacheKey(userId), JSON.stringify(textOnly))
     } catch {
       // The in-memory conversation remains usable when browser storage is unavailable.
     }

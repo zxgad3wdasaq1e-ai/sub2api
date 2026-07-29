@@ -118,6 +118,14 @@ func (s PromptSnapshot) Redacted() PromptSnapshot {
 	return s
 }
 
+func (s PromptSnapshot) ForStorage(storeFullPrompt bool) PromptSnapshot {
+	if !storeFullPrompt {
+		s.FullPrompt = ""
+	}
+	s.ScanText = ""
+	return s
+}
+
 type NormalizedResult struct {
 	Decision          EventDecision      `json:"decision"`
 	RiskLevel         RiskLevel          `json:"risk_level"`

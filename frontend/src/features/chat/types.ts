@@ -1,7 +1,10 @@
 export interface ChatAttachment {
   id: string
   name: string
-  dataUrl: string
+  attachmentId: string
+  contentType: string
+  byteSize: number
+  previewUrl: string
 }
 
 export interface ChatMessage {
@@ -12,6 +15,7 @@ export interface ChatMessage {
   createdAt: number
   pending?: boolean
   error?: boolean
+  status?: string
 }
 
 export interface Conversation {

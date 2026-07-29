@@ -24,6 +24,7 @@ export interface PromptAuditConfig {
   enabled: boolean
   blocking_enabled: boolean
   store_pass_events: boolean
+  store_full_prompt?: boolean
   effective_mode: PromptAuditMode
   strategy: 'priority'
   worker_count: number
@@ -47,6 +48,7 @@ export interface PromptAuditUpdateRequest {
   enabled: boolean
   blocking_enabled: boolean
   store_pass_events: boolean
+  store_full_prompt: boolean
   strategy: 'priority'
   worker_count: number
   queue_capacity: number
