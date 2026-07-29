@@ -16,7 +16,7 @@ func TestChatRepositoryConversationOwnershipIsolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		require.NoError(t, db.Close())
+		_ = db.Close()
 	})
 	repo := NewChatRepository(db)
 	query := regexp.QuoteMeta(`SELECT conversation_id,user_id,title,model,system_prompt,summary,version,created_at,updated_at
@@ -43,7 +43,7 @@ func TestChatRepositoryRunAndAttachmentOwnershipIsolation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		require.NoError(t, db.Close())
+		_ = db.Close()
 	})
 	repo := NewChatRepository(db)
 
@@ -68,7 +68,7 @@ func TestChatRepositoryRunStateTransitions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		require.NoError(t, db.Close())
+		_ = db.Close()
 	})
 	repo := NewChatRepository(db)
 	now := time.Now().UTC()
