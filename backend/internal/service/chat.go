@@ -296,7 +296,7 @@ func (s *ChatService) CreateRun(ctx context.Context, userID int64, conversationI
 	if in.SystemPrompt != nil {
 		conversation.SystemPrompt = *in.SystemPrompt
 	}
-	var apiKeyID *int64 = in.APIKeyID
+	apiKeyID := in.APIKeyID
 	var apiKey *APIKey
 	if s.apiKeys != nil && apiKeyID != nil && *apiKeyID > 0 {
 		apiKey, err = s.apiKeys.GetByID(ctx, *apiKeyID)

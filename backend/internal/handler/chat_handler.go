@@ -240,7 +240,7 @@ func (h *ChatHandler) UploadAttachment(c *gin.Context) {
 		response.ErrorFrom(c, service.ErrChatInvalid)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, 32<<20+1))
 	if err != nil || len(data) == 0 || len(data) > 32<<20 {
 		response.ErrorFrom(c, service.ErrChatInvalid)
@@ -264,7 +264,7 @@ func (h *ChatHandler) GetAttachmentContent(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	c.Header("Cache-Control", "private, max-age=300")
 	c.DataFromReader(http.StatusOK, attachment.ByteSize, attachment.ContentType, body, nil)
 }
@@ -369,8 +369,8 @@ func (h *ChatHandler) streamRun(c *gin.Context, subject middleware2.AuthSubject,
 			errorText = "upstream request failed"
 		}
 	}
-	if e := h.chat.FinishRun(context.Background(), userID, run.ID, finalStatus, text, errorText, usage); e != nil { /* response has already been committed; keep the run error in logs */
-	}
+	// The response has already been committed, so there is nothing left to send on failure.
+	_ = h.chat.FinishRun(context.Background(), userID, run.ID, finalStatus, text, errorText, usage)
 }
 
 type chatCaptureWriter struct {

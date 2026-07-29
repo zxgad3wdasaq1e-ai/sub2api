@@ -31,7 +31,7 @@ func (r *chatRepository) ListConversations(ctx context.Context, userID int64, li
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.ChatConversation, 0)
 	for rows.Next() {
 		var c service.ChatConversation
@@ -72,7 +72,7 @@ func (r *chatRepository) ListMessages(ctx context.Context, userID int64, convers
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.ChatMessage, 0)
 	for rows.Next() {
 		m, err := scanChatMessage(rows.Scan)
@@ -145,7 +145,7 @@ func (r *chatRepository) FinishRun(ctx context.Context, userID int64, id, status
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var messageID, conversationID string
 	err = tx.QueryRowContext(ctx, `UPDATE chat_runs SET status=$3,usage_json=$4::jsonb,error_message=$5,completed_at=$6
  WHERE run_id=$1 AND user_id=$2 RETURNING assistant_message_id,conversation_id`, id, userID, status, string(usage), errorText, at).Scan(&messageID, &conversationID)
